@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWorker, parseAccountResult, resolveOrcaBinary } from './src/worker.mjs';
+import { createWorker, orcaCommandEnv, parseAccountResult, resolveOrcaBinary } from './src/worker.mjs';
 import { POOLS, rankAccounts, scoreQuota } from './src/quota-policy.mjs';
 
 const NOW = 1_800_000_000_000;
@@ -56,6 +56,16 @@ test('Windows replaces a .cmd override with the matching exe and searches the Wi
   assert.equal(resolveOrcaBinary('win32', { ORCA_CLI_COMMAND: 'C:\\Tools\\orca.cmd' }, 'C:\\Users\\test', exists), exe);
   assert.equal(resolveOrcaBinary('win32', { Path: 'C:\\Other;"C:\\Tools"' }, 'C:\\Users\\test', exists), exe);
   assert.equal(resolveOrcaBinary('win32', {}, 'C:\\Users\\test', () => false), null);
+});
+
+test('Windows worker supplies missing APPDATA without overriding an existing profile path', () => {
+  const home = 'C:\\Users\\test';
+  const inherited = { USERPROFILE: home, ELECTRON_RUN_AS_NODE: '1', ORCA_ENVIRONMENT: 'remote', ORCA_PAIRING_CODE: 'mock' };
+  assert.deepEqual(orcaCommandEnv('win32', inherited, home), {
+    USERPROFILE: home, ELECTRON_RUN_AS_NODE: '1', APPDATA: `${home}\\AppData\\Roaming`,
+  });
+  assert.equal(orcaCommandEnv('win32', { APPDATA: 'D:\\Profiles\\Roaming' }, home).APPDATA, 'D:\\Profiles\\Roaming');
+  assert.equal(orcaCommandEnv('linux', {}, '/home/test').APPDATA, undefined);
 });
 
 test('pool isolation, exact low threshold, and composite weekly ranking', () => {

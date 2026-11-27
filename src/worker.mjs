@@ -64,12 +64,19 @@ export function parseAccountResult(result) {
   };
 }
 
+export function orcaCommandEnv(platform = process.platform, inherited = process.env, home = homedir()) {
+  const env = { ...inherited };
+  // Orca's Windows worker allowlist omits APPDATA, but its CLI needs it to find the local runtime.
+  if (platform === 'win32' && !env.APPDATA) env.APPDATA = win32.join(home, 'AppData', 'Roaming');
+  delete env.ORCA_ENVIRONMENT;
+  delete env.ORCA_PAIRING_CODE;
+  return env;
+}
+
 async function runOrca(args) {
   const bin = resolveOrcaBinary();
   if (!bin) throw new OrcaFailure('找不到 Orca 的原生命令行程序（orca.exe）。');
-  const env = { ...process.env };
-  delete env.ORCA_ENVIRONMENT;
-  delete env.ORCA_PAIRING_CODE;
+  const env = orcaCommandEnv();
   // Account commands resolve their runtime from cwd; never inherit a focused WSL workspace.
   const cwd = isAbsolute(bin) ? dirname(bin) : homedir();
   let stdout;
