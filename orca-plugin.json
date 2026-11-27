@@ -3,22 +3,14 @@
   "manifestVersion": 2,
   "id": "antigravity-rotator",
   "publisher": "syharipf",
-  "name": "Antigravity Auto-Switcher",
+  "name": "Antigravity 账号切换",
   "version": "1.0.0",
-  "description": "Account rotation and auto-resume for Antigravity on Orca ADE. Switches to lowest-usage account upon rate limits (429 / RESOURCE_EXHAUSTED).",
+  "description": "查看本机 Antigravity 账号的 5 小时及每周剩余额度，按所选额度池推荐账号，并可开启低额度自动轮换。",
   "license": "MIT",
-  "author": {
-    "name": "syharipf"
-  },
+  "author": { "name": "syharipf" },
   "repository": "https://github.com/Syharipf/orca-agy-rotator",
   "icon": "images/icon.png",
-  "cover": {
-    "path": "images/cover.png",
-    "alt": "Antigravity Auto-Switcher dashboard and rotation monitor in Orca ADE"
-  },
-  "engines": {
-    "orca": ">=1.4.248"
-  },
+  "engines": { "orca": ">=1.4.248" },
   "execution": "trusted-worker",
   "pluginApi": 1,
   "main": "src/worker.mjs",
@@ -26,81 +18,29 @@
     "panels": [
       {
         "id": "antigravity-switcher",
-        "title": "Antigravity Switcher",
+        "title": "Antigravity 账号",
         "icon": "refresh",
         "entry": "panel/index.html"
       }
     ],
     "commands": [
-      {
-        "id": "toggle-panel",
-        "title": "Antigravity: Show Switcher Panel",
-        "action": "sidebar.right.toggle"
-      },
-      {
-        "id": "rotate-now",
-        "title": "Antigravity: Rotate Account Now"
-      }
+      { "id": "toggle-panel", "title": "打开 Antigravity 账号面板", "action": "sidebar.right.toggle" },
+      { "id": "rotate-now", "title": "Antigravity：切换推荐账号" }
     ],
     "statusBarItems": [
       {
         "id": "agy-status",
-        "text": "Antigravity: Checking...",
+        "text": "Antigravity：读取中",
         "icon": "refresh",
-        "tooltip": "Antigravity Auto-Switcher",
+        "tooltip": "查看本机 Antigravity 账号及剩余额度",
         "command": "toggle-panel"
       }
     ],
-    "events": [
-      {
-        "on": "agent.status.changed"
-      },
-      {
-        "on": "workspace.changed"
-      }
-    ],
-    "settings": [
-      {
-        "key": "autoResume",
-        "title": "Auto-resume terminal after rotation",
-        "type": "boolean",
-        "default": true
-      },
-      {
-        "key": "resumeCommand",
-        "title": "Resume trigger text",
-        "type": "string",
-        "default": "lanjutkan pengerjaan tadi"
-      },
-      {
-        "key": "cooldownSeconds",
-        "title": "Cooldown between rotations (seconds)",
-        "type": "integer",
-        "default": 30
-      }
-    ]
+    "events": [{ "on": "workspace.changed" }]
   },
   "capabilities": [
-    {
-      "kind": "terminal:send"
-    },
-    {
-      "kind": "terminal:read"
-    },
-    {
-      "kind": "agent:read"
-    },
-    {
-      "kind": "workspace:read"
-    },
-    {
-      "kind": "notifications:show"
-    },
-    {
-      "kind": "settings:own"
-    },
-    {
-      "kind": "storage:own"
-    }
+    { "kind": "workspace:read" },
+    { "kind": "notifications:show" },
+    { "kind": "storage:own" }
   ]
 }

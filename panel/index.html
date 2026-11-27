@@ -1,1767 +1,336 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Antigravity Telemetry & Quota Insights</title>
-  <style>
-    :root {
-      /* shadcn/ui Slate Dark Design System Tokens */
-      --bg: var(--orca-background, #090d16);
-      --fg: var(--orca-foreground, #f8fafc);
-      --card: var(--orca-card, #0f172a);
-      --card-fg: #f8fafc;
-      --card-hover: rgba(255, 255, 255, 0.04);
-      --popover: #0f172a;
-      --popover-fg: #f8fafc;
-      --primary: var(--orca-primary, #38bdf8);
-      --primary-fg: #0f172a;
-      --secondary: #1e293b;
-      --secondary-fg: #f8fafc;
-      --muted: var(--orca-muted, #1e293b);
-      --muted-fg: var(--orca-muted-foreground, #94a3b8);
-      --accent: var(--orca-accent, #1e293b);
-      --accent-fg: #f8fafc;
-      --destructive: #ef4444;
-      --destructive-fg: #f8fafc;
-      --border: var(--orca-border, rgba(255, 255, 255, 0.08));
-      --input: rgba(255, 255, 255, 0.12);
-      --ring: #38bdf8;
-      --radius: var(--orca-radius, 8px);
-
-      /* Antigravity Semantic Accents */
-      --agy-blue: #3b82f6;
-      --agy-cyan: #38bdf8;
-      --agy-indigo: #6366f1;
-      --agy-purple: #8b5cf6;
-      --agy-emerald: #10b981;
-      --agy-emerald-glow: rgba(16, 185, 129, 0.12);
-      --agy-emerald-border: rgba(16, 185, 129, 0.28);
-      --agy-warning: #f59e0b;
-      --agy-danger: #ef4444;
-      --agy-danger-glow: rgba(239, 68, 68, 0.12);
-      --agy-danger-border: rgba(239, 68, 68, 0.28);
-
-      --font-sans: var(--orca-font-sans, "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
-      --font-mono: var(--orca-font-mono, "Geist Mono", "JetBrains Mono", "SF Mono", Menlo, monospace);
-    }
-
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font: 12px/1.45 var(--font-sans);
-      user-select: none;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      overflow-x: hidden;
-      width: 100%;
-      min-width: 0;
-    }
-
-    main {
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      width: 100%;\n      max-width: 900px;
-      margin: 0 auto;
-      min-width: 0;
-      overflow-x: hidden;
-    }
-
-    /* Scrollbars */
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
-
-    /* ================= 1. DYNAMIC TIME-BASED HERO BANNER ================= */
-    .hero {
-      position: relative;
-      border-radius: var(--radius);
-      overflow: hidden;
-      border: 1px solid var(--border);
-      min-height: 106px;
-      transition: background 0.6s ease;
-      background: linear-gradient(135deg, #050814 0%, #0f172a 40%, #1e1b4b 75%, #0b0e17 100%);
-      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.25);
-    }
-    .hero-canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      display: block;
-      pointer-events: none;
-      opacity: 0.9;
-    }
-    .hero-overlay {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, rgba(11, 14, 23, 0.2) 0%, rgba(11, 14, 23, 0.82) 100%);
-      pointer-events: none;
-    }
-    .hero-content {
-      position: relative;
-      z-index: 2;
-      padding: 12px 14px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      min-height: 106px;
-      color: #fff;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-    }
-    .hero-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 6px;
-    }
-    .hero-title-wrap {
-      min-width: 0;
-      overflow: hidden;
-    }
-    .hero-title {
-      font-size: 13.5px;
-      font-weight: 600;
-      letter-spacing: -0.02em;
-      color: #fff;
-      margin: 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .hero-subtitle {
-      font-size: 10.5px;
-      color: rgba(255, 255, 255, 0.75);
-      margin-top: 2px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    /* shadcn/ui Badge Variant: Outline/Subtle */
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 9.5px;
-      font-weight: 500;
-      padding: 2px 8px;
-      border-radius: 9999px;
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      white-space: nowrap;
-      flex-shrink: 0;
-      backdrop-filter: blur(4px);
-    }
-    .hero-stat-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 8px;
-      margin-top: 8px;
-      flex-wrap: wrap;
-    }
-    .hero-stat-main {
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
-      min-width: 0;
-    }
-    .hero-stat-main strong {
-      font-size: 24px;
-      font-family: var(--font-mono);
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      color: #ffffff;
-      line-height: 1;
-    }
-    .hero-stat-main span {
-      font-size: 11px;
-      color: rgba(255, 255, 255, 0.8);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .hero-stat-sub {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: #7dd3fc;
-      white-space: nowrap;
-    }
-
-    /* ================= 2. CONTROLS BAR (SHADCN TABS & BUTTONS) ================= */
-    .controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-      min-width: 0;
-    }
-    /* shadcn/ui TabsList Component */
-    .period-group {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 2px;
-      background: rgba(15, 23, 42, 0.7);
-      flex-shrink: 0;
-    }
-    /* shadcn/ui TabsTrigger Component */
-    .period-btn {
-      border: 0;
-      background: transparent;
-      color: var(--muted-fg);
-      font: inherit;
-      font-size: 10.5px;
-      font-weight: 500;
-      padding: 3px 9px;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-      white-space: nowrap;
-    }
-    .period-btn:hover {
-      color: var(--fg);
-    }
-    .period-btn[aria-checked="true"] {
-      background: #0284c7;
-      color: #ffffff;
-      font-weight: 600;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-    }
-    .actions-group {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      flex-shrink: 0;
-    }
-    /* shadcn/ui Button (Variant: Outline) */
-    .btn {
-      border: 1px solid var(--border);
-      background: rgba(15, 23, 42, 0.6);
-      color: var(--fg);
-      border-radius: 6px;
-      padding: 4px 10px;
-      font-size: 11px;
-      font-weight: 500;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-      white-space: nowrap;
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
-    }
-    .btn:hover {
-      background: rgba(30, 41, 59, 0.8);
-      border-color: rgba(255, 255, 255, 0.15);
-    }
-    .btn:active {
-      transform: scale(0.98);
-    }
-    /* shadcn/ui Button (Variant: Primary / Sky) */
-    .btn-rotate {
-      background: #0284c7;
-      border-color: #38bdf8;
-      color: #ffffff;
-      font-weight: 500;
-    }
-    .btn-rotate:hover {
-      background: #0369a1;
-      border-color: #7dd3fc;
-      box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
-    }
-
-    /* Active Gateway Route Chip */
-    .src-chip {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px 10px;
-      font-size: 11px;
-      width: 100%;
-      min-width: 0;
-      overflow: hidden;
-    }
-    .src-left {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      min-width: 0;
-      flex: 1;
-      overflow: hidden;
-    }
-    .status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--agy-emerald);
-      box-shadow: 0 0 6px var(--agy-emerald);
-      flex-shrink: 0;
-    }
-    .src-title {
-      font-weight: 600;
-      color: #fff;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      min-width: 0;
-      flex: 1;
-    }
-    .src-target {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--muted-fg);
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-
-    /* Toast Notification Banner */
-    .toast-banner {
-      display: none;
-      padding: 6px 10px;
-      border-radius: 6px;
-      font-size: 10.5px;
-      line-height: 1.35;
-      width: 100%;
-    }
-    .toast-banner.info {
-      background: rgba(56, 189, 248, 0.1);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      color: #bae6fd;
-    }
-    .toast-banner.error {
-      background: var(--agy-danger-glow);
-      border: 1px solid var(--agy-danger-border);
-      color: #fca5a5;
-    }
-
-    /* ================= 3. 2-COLUMN KPI CARDS ================= */
-    .kpi-row {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
-      width: 100%;
-      min-width: 0;
-    }
-    .card {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--card);
-      padding: 8px 10px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      min-height: 78px;
-      min-width: 0;
-      overflow: hidden;
-    }
-    .card-title {
-      font-size: 10.5px;
-      color: var(--muted-fg);
-      margin-bottom: 2px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .card-num {
-      font-size: 18px;
-      font-family: var(--font-mono);
-      font-weight: 700;
-      color: #fff;
-      line-height: 1.2;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .card-meta {
-      font-size: 9.5px;
-      color: var(--muted-fg);
-      margin-top: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .badge-savings {
-      background: var(--agy-emerald-glow);
-      color: #34d399;
-      border: 1px solid var(--agy-emerald-border);
-      padding: 1px 4px;
-      border-radius: 4px;
-      font-size: 9px;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-    .bar-line {
-      height: 4px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 2px;
-      overflow: hidden;
-      margin-top: 4px;
-      width: 100%;
-    }
-    .bar-line-fill {
-      height: 100%;
-      border-radius: 2px;
-      transition: width 0.3s ease;
-    }
-
-    /* ================= 4. SECTION WRAPPER & GRAPH ================= */
-    .section-card {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--card);
-      padding: 10px 12px;
-      width: 100%;
-      min-width: 0;
-      overflow: hidden;
-    }
-    .section-head {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      margin-bottom: 8px;
-      gap: 6px;
-      min-width: 0;
-    }
-    .section-head h2 {
-      font-size: 12px;
-      font-weight: 600;
-      color: #fff;
-      margin: 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .section-desc {
-      font-size: 10px;
-      color: var(--muted-fg);
-      margin-top: 1px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    /* SVG Usage Velocity Trend Graph */
-    .graph-container {
-      width: 100%;
-      height: 80px;
-      position: relative;
-      margin: 6px 0 2px;
-    }
-    .graph-svg {
-      width: 100%;
-      height: 100%;
-      display: block;
-      overflow: visible;
-    }
-    .graph-bar {
-      transition: opacity 0.15s ease, y 0.3s ease, height 0.3s ease;
-      cursor: pointer;
-    }
-    .graph-bar:hover {
-      opacity: 0.85;
-      filter: brightness(1.2);
-    }
-    .graph-labels {
-      display: flex;
-      justify-content: space-between;
-      font-family: var(--font-mono);
-      font-size: 8.5px;
-      color: var(--muted-fg);
-      margin-top: 2px;
-    }
-
-    /* Multi-Tier Quota Allocation Bar */
-    .token-bar-track {
-      height: 8px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 4px;
-      overflow: hidden;
-      display: flex;
-      margin-bottom: 8px;
-      width: 100%;
-    }
-    .token-seg {
-      height: 100%;
-      transition: width 0.3s ease;
-    }
-
-    /* Donut Mix Layout */
-    .donut-layout {
-      display: flex;
-      align-items: center;
-      justify-content: space-around;
-      gap: 12px;
-      padding: 4px 0;
-      flex-wrap: wrap;
-      width: 100%;
-    }
-    .donut-chart {
-      position: relative;
-      width: 90px;
-      height: 90px;
-      flex-shrink: 0;
-    }
-    .donut-svg {
-      width: 100%;
-      height: 100%;
-      transform: rotate(-90deg);
-    }
-    .donut-circle-bg {
-      fill: none;
-      stroke: rgba(255, 255, 255, 0.08);
-      stroke-width: 11;
-    }
-    .donut-circle-fill {
-      fill: none;
-      stroke: var(--agy-cyan);
-      stroke-width: 11;
-      stroke-linecap: round;
-      transition: stroke-dasharray 0.4s ease;
-    }
-    .donut-label {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      pointer-events: none;
-    }
-    .donut-pct {
-      font-family: var(--font-mono);
-      font-size: 15px;
-      font-weight: 700;
-      color: #fff;
-    }
-    .donut-sub {
-      font-size: 8px;
-      color: var(--muted-fg);
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-    .donut-legend {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      font-size: 10px;
-      min-width: 150px;
-      flex: 1;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      white-space: nowrap;
-    }
-    .legend-item-left {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      min-width: 0;
-    }
-    .legend-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .legend-txt {
-      color: var(--muted-fg);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .legend-val {
-      font-family: var(--font-mono);
-      font-weight: 600;
-      color: #fff;
-    }
-
-    /* ================= 5. ACCOUNT FLEET RANKING TABLE ================= */
-    .table-wrap {
-      width: 100%;
-      overflow-x: auto;
-      overflow-y: hidden;
-      -webkit-overflow-scrolling: touch;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background: rgba(0, 0, 0, 0.22);
-      scrollbar-width: thin;
-      scrollbar-color: #0284c7 rgba(255, 255, 255, 0.05);
-    }
-    .table-wrap::-webkit-scrollbar {
-      height: 6px;
-    }
-    .table-wrap::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.04);
-      border-radius: 3px;
-    }
-    .table-wrap::-webkit-scrollbar-thumb {
-      background: #0284c7;
-      border-radius: 3px;
-    }
-    .table-wrap::-webkit-scrollbar-thumb:hover {
-      background: #38bdf8;
-    }
-    .fleet-table {
-      min-width: 440px;
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 11px;
-    }
-    .fleet-table th {
-      text-align: left;
-      font-size: 9px;
-      font-weight: 600;
-      color: var(--muted-fg);
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      padding: 6px 6px;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-      background: rgba(19, 24, 38, 0.6);
-    }
-    .fleet-table td {
-      padding: 6px 6px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      vertical-align: middle;
-      white-space: nowrap;
-    }
-    .fleet-table tr:hover td {
-      background: rgba(255, 255, 255, 0.035);
-    }
-    .fleet-table tr.active-row td {
-      background: rgba(16, 185, 129, 0.05);
-      border-bottom-color: rgba(16, 185, 129, 0.2);
-    }
-    .rank-num {
-      font-family: var(--font-mono);
-      font-size: 9.5px;
-      color: var(--muted-fg);
-      text-align: center;
-    }
-    .acc-col {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-      overflow: hidden;
-    }
-    .acc-header {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      min-width: 0;
-    }
-    .acc-email-txt {
-      font-weight: 500;
-      color: #fff;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      min-width: 0;
-      flex: 1;
-    }
-    .acc-reset-txt {
-      font-family: var(--font-mono);
-      font-size: 8.5px;
-      color: var(--muted-fg);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    /* shadcn/ui Badge Variant: Secondary / Outline / Destructive */
-    .pill {
-      font-size: 8.5px;
-      font-weight: 600;
-      padding: 1.5px 6px;
-      border-radius: 9999px;
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      white-space: nowrap;
-      flex-shrink: 0;
-      letter-spacing: 0.02em;
-    }
-    .pill-active {
-      background: var(--agy-emerald-glow);
-      color: #34d399;
-      border: 1px solid var(--agy-emerald-border);
-    }
-    .pill-ready {
-      background: rgba(148, 163, 184, 0.1);
-      color: #94a3b8;
-      border: 1px solid rgba(148, 163, 184, 0.2);
-    }
-    .pill-limit {
-      background: var(--agy-danger-glow);
-      color: #f87171;
-      border: 1px solid var(--agy-danger-border);
-    }
-    .meter-inline {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      width: 100%;
-      min-width: 0;
-    }
-    .meter-track {
-      flex: 1;
-      height: 5px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 9999px;
-      overflow: hidden;
-      min-width: 25px;
-    }
-    .meter-fill {
-      height: 100%;
-      border-radius: 9999px;
-      transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .meter-num {
-      font-family: var(--font-mono);
-      font-size: 9.5px;
-      font-weight: 500;
-      width: 28px;
-      text-align: right;
-      flex-shrink: 0;
-    }
-    /* shadcn/ui Button (Variant: Outline / Small) */
-    .btn-select {
-      background: rgba(15, 23, 42, 0.7);
-      border: 1px solid var(--border);
-      color: #f8fafc;
-      padding: 3px 8px;
-      font-size: 10.5px;
-      font-weight: 500;
-      border-radius: 5px;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
-    }
-    .btn-select:hover {
-      background: #0284c7;
-      border-color: #38bdf8;
-      color: #ffffff;
-      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
-    }
-    .btn-select:active {
-      transform: scale(0.97);
-    }
-    .active-tag {
-      font-family: var(--font-mono);
-      font-size: 8.5px;
-      font-weight: 600;
-      color: #34d399;
-      background: var(--agy-emerald-glow);
-      border: 1px solid var(--agy-emerald-border);
-      padding: 1.5px 6px;
-      border-radius: 4px;
-      white-space: nowrap;
-    }
-
-    /* Footer */
-    footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      font-size: 9px;
-      color: var(--muted-fg);
-      padding-top: 4px;
-      border-top: 1px solid var(--border);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antigravity 账号额度</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: var(--orca-background, #fafafa);
+    --fg: var(--orca-foreground, #18181b);
+    --card: var(--orca-card, #fff);
+    --card-fg: var(--orca-card-foreground, #18181b);
+    --muted: var(--orca-muted, #ededf0);
+    --quiet: var(--orca-muted-foreground, #53535e);
+    --border: var(--orca-border, #dedee4);
+    --primary: var(--orca-primary, #27272a);
+    --primary-fg: var(--orca-primary-foreground, #fafafa);
+    --accent: var(--orca-accent, #efeff1);
+    --accent-fg: var(--orca-accent-foreground, #18181b);
+    --ring: var(--orca-ring, #315ab0);
+    --radius: var(--orca-radius, 8px);
+    --healthy: #047857;
+    --warning: #954407;
+    --danger: #b42318;
+  }
+  :root.dark {
+    color-scheme: dark;
+    --bg: var(--orca-background, #171719);
+    --fg: var(--orca-foreground, #fafafa);
+    --card: var(--orca-card, #202024);
+    --card-fg: var(--orca-card-foreground, #fafafa);
+    --muted: var(--orca-muted, #323237);
+    --quiet: var(--orca-muted-foreground, #b0b0b9);
+    --border: var(--orca-border, #3a3a41);
+    --primary: var(--orca-primary, #f4f4f5);
+    --primary-fg: var(--orca-primary-foreground, #1b1b1d);
+    --accent: var(--orca-accent, #303035);
+    --accent-fg: var(--orca-accent-foreground, #fafafa);
+    --ring: var(--orca-ring, #a5baf7);
+    --healthy: #6ee7b7;
+    --warning: #fbc878;
+    --danger: #fda29b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 var(--orca-font-sans, system-ui, sans-serif); }
+  main { padding: 16px; max-width: 800px; margin-inline: auto; }
+  main > * + * { margin-top: 16px; }
+  h1, h2, p, ul, dl, dd { margin: 0; }
+  h1 { font-size: 17px; font-weight: 650; }
+  h2, summary { font-size: 13px; font-weight: 650; }
+  .quiet { color: var(--quiet); font-size: 12px; }
+  .row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  button, select { min-height: 30px; max-width: 100%; padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--card-fg); font: inherit; }
+  button, summary { cursor: pointer; }
+  button:not(:disabled):hover, select:not(:disabled):hover { background: var(--accent); color: var(--accent-fg); }
+  button:disabled, select:disabled { cursor: default; background: var(--muted); color: var(--quiet); }
+  .primary:not(:disabled) { background: var(--primary); color: var(--primary-fg); }
+  .primary:not(:disabled):hover { filter: brightness(.9); }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  input { accent-color: var(--primary); margin: 0; }
+  .box { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--card-fg); }
+  .box > * + * { margin-top: 8px; }
+  .current { font-weight: 650; overflow-wrap: anywhere; }
+  .controls { padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+  .control { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; flex-wrap: wrap; }
+  .message { padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--border); overflow-wrap: anywhere; }
+  .message.error { color: var(--danger); }
+  .list { list-style: none; padding: 0; margin-top: 8px; display: grid; gap: 6px; }
+  .account { padding: 9px 10px; min-width: 0; }
+  .account[data-active="true"] { box-shadow: inset 2px 0 var(--healthy); }
+  .account-header { display: flex; align-items: start; gap: 6px 10px; }
+  .account-id { display: flex; flex: 1; align-items: baseline; gap: 4px 6px; flex-wrap: wrap; min-width: 0; }
+  .account-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .badge { border: 1px solid var(--border); border-radius: 5px; padding-inline: 5px; color: var(--quiet); font-size: 11px; white-space: nowrap; }
+  .badge.good { color: var(--healthy); }
+  .badge.low { color: var(--warning); }
+  .meters, .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+  .meter-head { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
+  .number { font-variant-numeric: tabular-nums; }
+  .track { height: 5px; border-radius: 100px; background: var(--muted); overflow: hidden; margin-block: 4px; }
+  .fill { height: 100%; background: var(--healthy); border-radius: inherit; }
+  .fill.low { background: var(--warning); }
+  .fill.old { background: var(--quiet); }
+  .stats dd { font-weight: 600; overflow-wrap: anywhere; }
+  footer { border-top: 1px solid var(--border); padding-top: 9px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 340px) {
+    main { padding: 10px; }
+    .meters { grid-template-columns: 1fr; }
+  }
+</style>
 </head>
 <body>
-
 <main>
-  <!-- 1. DYNAMIC TIME-BASED HERO BANNER -->
-  <section id="heroBanner" class="hero">
-    <!-- Dynamic SVG Canvas for Skyline, Sun/Moon, and Constellations -->
-    <svg id="heroCanvas" class="hero-canvas" viewBox="0 0 400 110" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="110" gradientUnits="userSpaceOnUse">
-          <stop id="gradStop1" offset="0%" stop-color="#050814"/>
-          <stop id="gradStop2" offset="50%" stop-color="#0f172a"/>
-          <stop id="gradStop3" offset="100%" stop-color="#0b0e17"/>
-        </linearGradient>
-      </defs>
-      <rect width="400" height="110" fill="url(#skyGrad)"/>
-
-      <!-- Celestial Body (Sun or Moon) -->
-      <g id="celestialGroup"></g>
-
-      <!-- Atmospheric Stars / Sparkles -->
-      <g id="starsGroup"></g>
-
-      <!-- Pixel City Skyline Silhouette -->
-      <g id="skylineGroup" fill="#070a12" fill-opacity="0.9">
-        <rect x="15" y="65" width="30" height="45"/>
-        <rect x="55" y="48" width="38" height="62"/>
-        <rect x="105" y="70" width="28" height="40"/>
-        <rect x="145" y="42" width="45" height="68"/>
-        <rect x="202" y="60" width="32" height="50"/>
-        <rect x="245" y="52" width="40" height="58"/>
-        <rect x="295" y="66" width="35" height="44"/>
-        <rect x="340" y="46" width="45" height="64"/>
-      </g>
-
-      <!-- Skyline Windows / Beacons -->
-      <g id="beaconsGroup"></g>
-    </svg>
-
-    <div class="hero-overlay"></div>
-
-    <div class="hero-content">
-      <div class="hero-header">
-        <div class="hero-title-wrap">
-          <h1 id="heroTitle" class="hero-title">Antigravity Telemetry</h1>
-          <div id="heroSubtitle" class="hero-subtitle">Real-time quota monitoring &amp; failover pool</div>
-        </div>
-        <div id="heroTimeBadge" class="hero-badge">🌙 Night Ops</div>
-      </div>
-
-      <div class="hero-stat-row">
-        <div class="hero-stat-main">
-          <strong id="heroMainNum">108.5M</strong>
-          <span id="heroMainLabel">Tokens · 96.4% Cache Hit</span>
-        </div>
-        <div id="heroSubNum" class="hero-stat-sub">Est. Cost: $38.18</div>
+  <header>
+    <div class="row">
+      <h1>账号额度</h1>
+      <div class="actions">
+        <button id="refresh" type="button" disabled>刷新</button>
+        <button id="recommend" class="primary" type="button" aria-describedby="recommendation" disabled>切换推荐账号</button>
       </div>
     </div>
+    <p id="sync" class="quiet" role="status">正在连接 Orca…</p>
+    <p id="recommendation" class="quiet" hidden></p>
+  </header>
+
+  <div id="notice" class="message" role="status" aria-atomic="true" hidden></div>
+  <div id="error" class="message error" role="alert" hidden></div>
+
+  <section class="box" aria-labelledby="current-title">
+    <h2 id="current-title">本机当前账号</h2>
+    <p id="current" class="current">—</p>
+    <p class="quiet">当前模型：<span id="model">暂无法读取</span></p>
+    <div class="controls">
+      <label class="control" for="pool">监控额度池
+        <select id="pool" disabled>
+          <option value="">未选择</option>
+          <option value="gemini">Gemini</option>
+          <option value="claude-gpt">Claude / GPT</option>
+        </select>
+      </label>
+      <label class="control"><input id="auto" type="checkbox" disabled> 自动轮换</label>
+      <label class="control"><input id="mask" type="checkbox" checked disabled> 隐藏账号</label>
+    </div>
+    <p id="policy" class="quiet">等待账号数据</p>
   </section>
 
-  <!-- 2. CONTROLS BAR (TIME PERIOD FILTER & ACTIONS) -->
-  <section class="controls">
-    <!-- Period Filter Pills (Single Page - No Tab Switching) -->
-    <div class="period-group" role="radiogroup" aria-label="Timeframe">
-      <button class="period-btn" data-period="today" aria-checked="true">Today</button>
-      <button class="period-btn" data-period="7d" aria-checked="false">7d</button>
-      <button class="period-btn" data-period="30d" aria-checked="false">30d</button>
-      <button class="period-btn" data-period="all" aria-checked="false">All</button>
+  <section aria-labelledby="accounts-title">
+    <div class="row">
+      <h2 id="accounts-title">已保存账号</h2>
+      <span id="count" class="quiet"></span>
     </div>
-
-    <!-- Quick Actions -->
-    <div class="actions-group">
-      <button id="btnMask" class="btn" title="Toggle Privacy Mask (Sembunyikan email asli)">
-        <span id="maskBtnText">Mask: Off</span>
-      </button>
-      <button id="btnRefresh" class="btn" title="Sync Quota Telemetry">
-        Sync
-      </button>
-      <button id="btnRotate" class="btn btn-rotate" title="Rotate to account with lowest quota">
-        ⚡ Rotate Best
-      </button>
-    </div>
+    <ul id="accounts" class="list"></ul>
+    <p id="empty" class="quiet">正在读取账号…</p>
   </section>
 
-  <!-- Active Route Chip -->
-  <div class="src-chip">
-    <div class="src-left">
-      <span class="status-dot"></span>
-      <span id="srcRouteTitle" class="src-title">Active Route: Loading...</span>
-    </div>
-    <span id="srcTargetSub" class="src-target">Auto-resume armed</span>
-  </div>
+  <details id="usage" class="box">
+    <summary>用量统计</summary>
+    <p class="quiet">近 24 小时 · 本机可读取的 Antigravity 会话记录，不按账号区分。</p>
+    <p id="stats-message" class="quiet"></p>
+    <dl id="stats" class="stats" hidden></dl>
+  </details>
 
-  <!-- Toast Banner -->
-  <div id="statusToast" class="toast-banner"></div>
-
-  <!-- 3. 2-COLUMN KPI METRIC CARDS -->
-  <section class="kpi-row">
-    <!-- Card 1: Total Tokens & Input/Output -->
-    <div class="card">
-      <div class="card-title">Total Tokens</div>
-      <div id="kpiTotalTokens" class="card-num">0</div>
-      <div class="bar-line">
-        <div id="kpiTokenBar" class="bar-line-fill" style="width: 100%; background: var(--agy-cyan);"></div>
-      </div>
-      <div class="card-meta">
-        <span id="kpiInputOutput">In: 0 · Out: 0</span>
-        <span id="kpiTurns">0 turns</span>
-      </div>
-    </div>
-
-    <!-- Card 2: Est Cost & Cache Savings -->
-    <div class="card">
-      <div class="card-title">Estimated Cost</div>
-      <div id="kpiCost" class="card-num">$0.00</div>
-      <div class="bar-line">
-        <div class="bar-line-fill" style="width: 100%; background: var(--agy-purple);"></div>
-      </div>
-      <div class="card-meta">
-        <span class="badge-savings" id="kpiSavings">Saved $0.00</span>
-        <span>Estimasi kasar (tarif asumsi)</span>
-      </div>
-    </div>
-
-    <!-- Card 3: Cache Hit Rate -->
-    <div class="card">
-      <div class="card-title">Cache Hit Rate</div>
-      <div id="kpiHitRate" class="card-num">0%</div>
-      <div class="bar-line">
-        <div id="kpiHitBar" class="bar-line-fill" style="width: 0%; background: var(--agy-emerald);"></div>
-      </div>
-      <div class="card-meta">
-        <span id="kpiCacheTokens">0 cached tokens</span>
-        <span>Context cache</span>
-      </div>
-    </div>
-
-    <!-- Card 4: Session Quota & Account Pool -->
-    <div class="card">
-      <div class="card-title">Session Quota (5h)</div>
-      <div id="kpiSessionQuota" class="card-num">0%</div>
-      <div class="bar-line">
-        <div id="kpiSessionBar" class="bar-line-fill" style="width: 0%; background: var(--agy-emerald);"></div>
-      </div>
-      <div class="card-meta">
-        <span id="kpiFleetReady">5/6 ready</span>
-        <span>Account pool</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- 4. TOKEN VELOCITY USAGE GRAPH -->
-  <section class="section-card">
-    <div class="section-head">
-      <div>
-        <h2>Token Usage Velocity</h2>
-        <div id="graphPeriodLabel" class="section-desc">Activity trend over time</div>
-      </div>
-      <span id="graphMaxVal" class="muted" style="font-size:9.5px; font-family:var(--font-mono); color:var(--muted-fg);">Max: 0</span>
-    </div>
-
-    <div class="graph-container">
-      <svg id="trendSvg" class="graph-svg" viewBox="0 0 300 80" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#38bdf8"/>
-            <stop offset="100%" stop-color="#1e3a8a"/>
-          </linearGradient>
-        </defs>
-        <!-- Horizontal Grid Lines -->
-        <line x1="0" y1="20" x2="300" y2="20" stroke="rgba(255,255,255,0.05)" stroke-dasharray="3 3"/>
-        <line x1="0" y1="50" x2="300" y2="50" stroke="rgba(255,255,255,0.05)" stroke-dasharray="3 3"/>
-        <!-- Dynamic Bars Injected Here -->
-        <g id="graphBarsGroup"></g>
-      </svg>
-    </div>
-
-    <div id="graphXLabels" class="graph-labels">
-      <span>Start</span>
-      <span>Mid</span>
-      <span>Latest</span>
-    </div>
-  </section>
-
-  <!-- 5. TOKEN ALLOCATION & EFFICIENCY MIX -->
-  <section class="section-card">
-    <div class="section-head">
-      <div>
-        <h2>Token Allocation &amp; Efficiency</h2>
-        <div class="section-desc">Cache read vs prompt input vs completion output</div>
-      </div>
-    </div>
-
-    <!-- Multi-Color Segmented Bar -->
-    <div class="token-bar-track">
-      <div id="segCache" class="token-seg" style="width: 96%; background: var(--agy-cyan);" title="Cache Read"></div>
-      <div id="segInput" class="token-seg" style="width: 3%; background: var(--agy-purple);" title="Prompt Input"></div>
-      <div id="segOutput" class="token-seg" style="width: 1%; background: var(--agy-emerald);" title="Model Output"></div>
-    </div>
-
-    <div class="donut-layout">
-      <!-- Donut SVG -->
-      <div class="donut-chart">
-        <svg class="donut-svg" viewBox="0 0 100 100">
-          <circle class="donut-circle-bg" cx="50" cy="50" r="38"/>
-          <circle id="donutCircleFill" class="donut-circle-fill" cx="50" cy="50" r="38" stroke-dasharray="230 240"/>
-        </svg>
-        <div class="donut-label">
-          <div id="donutCenterPct" class="donut-pct">96%</div>
-          <div class="donut-sub">Cache Hit</div>
-        </div>
-      </div>
-
-      <!-- Donut Legend -->
-      <div class="donut-legend">
-        <div class="legend-item">
-          <div class="legend-item-left">
-            <span class="legend-dot" style="background: var(--agy-cyan);"></span>
-            <span class="legend-txt">Cache Read:</span>
-          </div>
-          <span id="legendCacheVal" class="legend-val">104.7M (96.4%)</span>
-        </div>
-        <div class="legend-item">
-          <div class="legend-item-left">
-            <span class="legend-dot" style="background: var(--agy-purple);"></span>
-            <span class="legend-txt">Prompt Input:</span>
-          </div>
-          <span id="legendInputVal" class="legend-val">3.34M (3.1%)</span>
-        </div>
-        <div class="legend-item">
-          <div class="legend-item-left">
-            <span class="legend-dot" style="background: var(--agy-emerald);"></span>
-            <span class="legend-txt">Model Output:</span>
-          </div>
-          <span id="legendOutputVal" class="legend-val">516.7K (0.5%)</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 6. ACCOUNT FLEET RANKING TABLE -->
-  <section class="section-card">
-    <div class="section-head">
-      <div>
-        <h2>Account Fleet Ranking</h2>
-        <div class="section-desc">Click row or Select button to switch active route</div>
-      </div>
-      <div style="text-align:right;">
-        <span id="fleetTableCount" style="font-size:9.5px; font-family:var(--font-mono); color:var(--muted-fg);">6 accounts</span>
-        <div style="font-size:8.5px; color:#7dd3fc; font-family:var(--font-mono); white-space:nowrap;">⇄ Scrollable</div>
-      </div>
-    </div>
-
-    <div class="table-wrap">
-      <table class="fleet-table">
-        <thead>
-          <tr>
-            <th style="width: 24px; text-align:center;">#</th>
-            <th style="width: 170px;">Account</th>
-            <th style="width: 110px;">Session (5h)</th>
-            <th style="width: 100px;">Weekly (7d)</th>
-            <th style="width: 65px; text-align:right;">Action</th>
-          </tr>
-        </thead>
-        <tbody id="fleetTableBody">
-          <!-- Dynamic Account Rows Injected Here -->
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer>
-    <span id="footerSyncStatus">Telemetry: Real-time (3.5s)</span>
-    <span>v1.0.0</span>
-  </footer>
+  <footer class="quiet">切换的是本机登录账号。插件不会中断或重发当前回合；后续回合是否使用所选账号取决于 Orca 的会话路由。</footer>
 </main>
-
 <script>
-  // RPC Bridge
-  function rpc(action, payload) {
-    const host = window.orca || globalThis.orca;
-    if (host && host.plugin) {
-      if (typeof host.plugin.request === 'function') {
-        return host.plugin.request(action, payload);
+  const $ = (id) => document.getElementById(id);
+  const nf = new Intl.NumberFormat('zh-CN');
+  const usd = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD' });
+  const stamp = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  function node(tag, text, cls) {
+    const el = document.createElement(tag);
+    if (text != null) el.textContent = text;
+    if (cls) el.className = cls;
+    return el;
+  }
+  let host;
+  let state;
+  let busy = false;
+  let statsPending = false;
+
+  function receive(next) {
+    if (!next || !Array.isArray(next.accounts) || next.revision < (state?.revision ?? -1)) return;
+    state = next;
+    render();
+  }
+
+  function meter(title, quota, live) {
+    const box = node('div');
+    const head = node('div', null, 'meter-head');
+    head.append(node('span', title, 'quiet'), node('strong', quota ? `${quota.remaining}%` : '未知', 'number'));
+    const track = node('div', null, 'track');
+    track.setAttribute('aria-hidden', 'true');
+    if (quota) {
+      const fill = node('div', null, `fill${!live || !quota.valid ? ' old' : quota.remaining <= 5 ? ' low' : ''}`);
+      fill.style.width = `${quota.remaining}%`;
+      track.append(fill);
+    }
+    const reset = quota?.resetsAt ? `${stamp.format(quota.resetsAt)} 重置` : '重置时间未知';
+    box.append(head, track, node('div', reset, 'quiet'));
+    return box;
+  }
+
+  function render() {
+    const blocked = busy || !!state?.switching;
+    const hasData = state?.syncedAt != null;
+    const live = hasData && !state?.error;
+    $('refresh').disabled = blocked || !host;
+    $('recommend').disabled = blocked || !live || !state?.recommendedId;
+    $('auto').disabled = blocked || !state?.pool;
+    $('mask').disabled = $('pool').disabled = blocked || !state;
+    if (!state) return;
+    $('pool').value = state.pool ?? '';
+    $('auto').checked = state.auto;
+    $('mask').checked = state.masked;
+    $('sync').textContent = state.switching ? '正在切换账号…' : hasData
+      ? `${state.error ? '上次成功同步' : '同步于'} ${stamp.format(state.syncedAt)} · 每 ${state.intervalSeconds} 秒检查`
+      : state.error ? '尚未成功同步' : '正在读取账号…';
+    $('error').hidden = !state.error;
+    $('error').textContent = state.error ? `${state.error}${hasData ? ' 下方是上次成功读取的数据。' : ''}` : '';
+    $('current').textContent = state.accounts.find((item) => item.active)?.label ??
+      (live ? '未识别到当前账号' : '—');
+    $('model').textContent = state.model || '暂无法读取';
+    $('policy').textContent = state.policy;
+    $('recommendation').textContent = state.recommendation ?? '';
+    $('recommendation').hidden = !state.recommendation;
+    $('count').textContent = hasData ? `${state.accounts.length} 个` : '';
+    $('empty').hidden = state.accounts.length > 0;
+    $('empty').textContent = state.error ? '暂无可显示的账号数据。' : live ? '尚未在 Orca 中保存账号。' : '正在读取账号…';
+    renderAccounts(blocked, live);
+  }
+
+  function renderAccounts(blocked, live) {
+    const list = $('accounts');
+    const focusedId = document.activeElement?.dataset.account;
+    const fragment = document.createDocumentFragment();
+    let focusTarget;
+    const rows = [...state.accounts].sort((a, b) =>
+      Number(b.active) - Number(a.active) ||
+      Number(b.id === state.recommendedId) - Number(a.id === state.recommendedId) ||
+      (b.score ?? -1) - (a.score ?? -1));
+    for (const item of rows) {
+      const row = node('li', null, 'account box');
+      row.dataset.active = item.active;
+      const heading = node('div', null, 'account-header');
+      const identity = node('div', null, 'account-id');
+      identity.append(node('span', item.label, 'account-name'));
+      if (item.active) identity.append(node('span', '当前', 'badge good'));
+      if (item.id === state.recommendedId) identity.append(node('span', '推荐', 'badge good'));
+      if (item.low && live) identity.append(node('span', '额度低', 'badge low'));
+      if (state.pool && (!item.fiveHour || !item.weekly)) identity.append(node('span', '额度未知', 'badge'));
+      else if (state.pool && (!item.valid || !live)) identity.append(node('span', '数据已过期', 'badge'));
+      heading.append(identity);
+      if (!item.active) {
+        const button = node('button', '切换');
+        button.type = 'button';
+        button.dataset.account = item.id;
+        button.setAttribute('aria-label', `切换至 ${item.label}`);
+        button.disabled = blocked || !live;
+        button.addEventListener('click', () => action('accounts.selectTarget', { id: item.id }, '已切换账号。'));
+        heading.append(button);
+        if (focusedId === item.id && !button.disabled) focusTarget = button;
       }
-      if (typeof host.plugin.call === 'function') {
-        return host.plugin.call(action, payload);
+      row.append(heading);
+      if (state.pool) {
+        const meters = node('div', null, 'meters');
+        meters.append(meter('5 小时剩余', item.fiveHour, live), meter('每周剩余', item.weekly, live));
+        row.append(meters, node('p', item.updatedAt ? `额度读于 ${stamp.format(item.updatedAt)}` : '暂无额度读数', 'quiet'));
       }
+      fragment.append(row);
     }
-    return Promise.reject(new Error('Orca plugin host API unavailable'));
+    list.replaceChildren(fragment);
+    focusTarget?.focus();
   }
 
-  function showToast(msg, isError = false) {
-    const el = document.getElementById('statusToast');
-    if (!el) return;
-    el.textContent = msg;
-    el.className = 'toast-banner ' + (isError ? 'error' : 'info');
-    el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 3500);
+  function message(text, failed = false) {
+    $('notice').hidden = !text;
+    $('notice').classList.toggle('error', failed);
+    $('notice').textContent = text;
   }
-
-  function formatTokens(num) {
-    if (!num || isNaN(num)) return '0';
-    if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
-    if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M';
-    if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K';
-    return String(Math.round(num));
-  }
-
-  function formatCost(num) {
-    if (!num || isNaN(num)) return '$0.00';
-    return '$' + Number(num).toFixed(2);
-  }
-
-  function formatMinutes(tsMs) {
-    if (!tsMs || isNaN(tsMs)) return '—';
-    const m = Math.max(0, Math.floor((tsMs - Date.now()) / 60000));
-    if (m === 0) return 'Resetting now';
-    if (m >= 60) {
-      const h = Math.floor(m / 60);
-      const remM = m % 60;
-      return `${h}h ${remM}m left`;
-    }
-    return `${m}m left`;
-  }
-
-  // ================= DYNAMIC TIME-OF-DAY BANNER LOGIC =================
-  let timeModeOverride = null; // null = use live system clock
-  const TIME_THEMES = [
-    { name: 'auto', label: 'Auto (Clock)' },
-    { name: 'dawn', hour: 7, label: '🌅 Dawn (07:00)' },
-    { name: 'daylight', hour: 13, label: '☀️ Daylight (13:00)' },
-    { name: 'sunset', hour: 18, label: '🌇 Sunset (18:00)' },
-    { name: 'night', hour: 22, label: '🌙 Night (22:00)' }
-  ];
-  let timeThemeIdx = 0;
-
-  function updateHeroSkyline() {
-    const now = new Date();
-    const hour = timeModeOverride !== null ? timeModeOverride : now.getHours();
-
-    const banner = document.getElementById('heroBanner');
-    const titleEl = document.getElementById('heroTitle');
-    const subEl = document.getElementById('heroSubtitle');
-    const badgeEl = document.getElementById('heroTimeBadge');
-    const gradStop1 = document.getElementById('gradStop1');
-    const gradStop2 = document.getElementById('gradStop2');
-    const gradStop3 = document.getElementById('gradStop3');
-    const celestialGroup = document.getElementById('celestialGroup');
-    const starsGroup = document.getElementById('starsGroup');
-    const beaconsGroup = document.getElementById('beaconsGroup');
-
-    badgeEl.style.cursor = 'pointer';
-    badgeEl.title = 'Click to preview / cycle daylight themes (Dawn, Daylight, Sunset, Night, Auto)';
-
-    // 1. Dawn / Morning (05:00 - 10:59)
-    if (hour >= 5 && hour < 11) {
-      banner.style.background = 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 40%, #ea580c 80%, #fde047 100%)';
-      gradStop1.setAttribute('stop-color', '#1e3a8a');
-      gradStop2.setAttribute('stop-color', '#3b82f6');
-      gradStop3.setAttribute('stop-color', '#f97316');
-      titleEl.textContent = 'Morning Operations';
-      subEl.textContent = 'Fresh 5-hour quota pools ready for heavy agent workflows';
-      badgeEl.textContent = '🌅 05:00–11:00 Dawn';
-      badgeEl.style.borderColor = 'rgba(253, 224, 71, 0.4)';
-      badgeEl.style.color = '#fef08a';
-
-      celestialGroup.innerHTML = `
-        <!-- Morning Sun rising on left -->
-        <circle cx="65" cy="35" r="16" fill="#fde047" fill-opacity="0.9"/>
-        <circle cx="65" cy="35" r="28" fill="#fb923c" fill-opacity="0.25"/>
-      `;
-      starsGroup.innerHTML = `
-        <circle cx="140" cy="20" r="1" fill="#fff" fill-opacity="0.5"/>
-        <circle cx="280" cy="18" r="1" fill="#fff" fill-opacity="0.5"/>
-      `;
-      beaconsGroup.innerHTML = `
-        <circle cx="74" cy="52" r="1.5" fill="#fde047" fill-opacity="0.8"/>
-        <circle cx="167" cy="45" r="1.5" fill="#38bdf8" fill-opacity="0.8"/>
-      `;
-    }
-    // 2. Daytime / Peak Velocity (11:00 - 16:59)
-    else if (hour >= 11 && hour < 17) {
-      banner.style.background = 'linear-gradient(135deg, #0369a1 0%, #0284c7 40%, #38bdf8 80%, #60a5fa 100%)';
-      gradStop1.setAttribute('stop-color', '#0369a1');
-      gradStop2.setAttribute('stop-color', '#0284c7');
-      gradStop3.setAttribute('stop-color', '#38bdf8');
-      titleEl.textContent = 'Daylight Velocity';
-      subEl.textContent = 'Peak throughput active · Continuous auto-failover armed';
-      badgeEl.textContent = '☀️ 11:00–17:00 Daylight';
-      badgeEl.style.borderColor = 'rgba(56, 189, 248, 0.4)';
-      badgeEl.style.color = '#bae6fd';
-
-      celestialGroup.innerHTML = `
-        <!-- High Noon Sun on right -->
-        <circle cx="320" cy="28" r="14" fill="#ffffff" fill-opacity="0.95"/>
-        <circle cx="320" cy="28" r="26" fill="#7dd3fc" fill-opacity="0.35"/>
-      `;
-      starsGroup.innerHTML = '';
-      beaconsGroup.innerHTML = `
-        <circle cx="74" cy="52" r="1.5" fill="#10b981" fill-opacity="0.9"/>
-        <circle cx="167" cy="45" r="1.5" fill="#38bdf8" fill-opacity="0.9"/>
-        <circle cx="265" cy="56" r="1.5" fill="#10b981" fill-opacity="0.9"/>
-      `;
-    }
-    // 3. Golden Hour / Sunset (17:00 - 18:59)
-    else if (hour >= 17 && hour < 19) {
-      banner.style.background = 'linear-gradient(135deg, #4c1d95 0%, #9333ea 35%, #db2777 65%, #ea580c 85%, #f59e0b 100%)';
-      gradStop1.setAttribute('stop-color', '#4c1d95');
-      gradStop2.setAttribute('stop-color', '#db2777');
-      gradStop3.setAttribute('stop-color', '#ea580c');
-      titleEl.textContent = 'Golden Hour Sync';
-      subEl.textContent = 'Evening transition · Quota monitoring & rotation standby';
-      badgeEl.textContent = '🌇 17:00–19:00 Sunset';
-      badgeEl.style.borderColor = 'rgba(251, 146, 60, 0.4)';
-      badgeEl.style.color = '#fed7aa';
-
-      celestialGroup.innerHTML = `
-        <!-- Sunset disk behind skyscrapers -->
-        <circle cx="190" cy="50" r="18" fill="#f59e0b" fill-opacity="0.9"/>
-        <circle cx="190" cy="50" r="32" fill="#db2777" fill-opacity="0.3"/>
-      `;
-      starsGroup.innerHTML = `
-        <circle cx="50" cy="18" r="1" fill="#fff" fill-opacity="0.7"/>
-        <circle cx="330" cy="15" r="1.2" fill="#fff" fill-opacity="0.7"/>
-      `;
-      beaconsGroup.innerHTML = `
-        <circle cx="74" cy="52" r="1.5" fill="#f59e0b" fill-opacity="0.9"/>
-        <circle cx="167" cy="45" r="1.5" fill="#ef4444" fill-opacity="0.9"/>
-      `;
-    }
-    // 4. Night Ops (19:00 - 04:59)
-    else {
-      banner.style.background = 'linear-gradient(135deg, #050814 0%, #0f172a 40%, #1e1b4b 75%, #0b0e17 100%)';
-      gradStop1.setAttribute('stop-color', '#050814');
-      gradStop2.setAttribute('stop-color', '#0f172a');
-      gradStop3.setAttribute('stop-color', '#1e1b4b');
-      titleEl.textContent = 'Night Ops Patrol';
-      subEl.textContent = 'Automated quota monitoring & failover standby';
-      badgeEl.textContent = '🌙 19:00–05:00 Night';
-      badgeEl.style.borderColor = 'rgba(147, 197, 253, 0.3)';
-      badgeEl.style.color = '#93c5fd';
-
-      celestialGroup.innerHTML = `
-        <!-- Glowing Crescent Moon -->
-        <path d="M 320,16 A 12,12 0 1,0 332,28 A 10,10 0 1,1 320,16 Z" fill="#fef08a" fill-opacity="0.95"/>
-        <circle cx="324" cy="22" r="18" fill="#60a5fa" fill-opacity="0.15"/>
-      `;
-      starsGroup.innerHTML = `
-        <circle cx="35" cy="18" r="1" fill="#93c5fd" fill-opacity="0.8"/>
-        <circle cx="85" cy="12" r="1.3" fill="#fff" fill-opacity="0.9"/>
-        <circle cx="130" cy="24" r="0.8" fill="#93c5fd" fill-opacity="0.7"/>
-        <circle cx="180" cy="14" r="1.2" fill="#fff" fill-opacity="0.85"/>
-        <circle cx="230" cy="22" r="0.9" fill="#93c5fd" fill-opacity="0.6"/>
-        <circle cx="275" cy="10" r="1.4" fill="#fef08a" fill-opacity="0.9"/>
-      `;
-      beaconsGroup.innerHTML = `
-        <circle cx="74" cy="52" r="1.5" fill="#10b981" fill-opacity="0.9"/>
-        <circle cx="167" cy="45" r="1.5" fill="#ef4444" fill-opacity="0.9"/>
-        <circle cx="265" cy="56" r="1.5" fill="#38bdf8" fill-opacity="0.9"/>
-        <circle cx="362" cy="50" r="1.5" fill="#f59e0b" fill-opacity="0.9"/>
-      `;
-    }
-  }
-
-  // Bind click on hero badge for instant theme preview
-  document.getElementById('heroTimeBadge').addEventListener('click', () => {
-    timeThemeIdx = (timeThemeIdx + 1) % TIME_THEMES.length;
-    const t = TIME_THEMES[timeThemeIdx];
-    timeModeOverride = t.hour !== undefined ? t.hour : null;
-    updateHeroSkyline();
-    showToast(`Diurnal Skyline: ${t.label}`);
-  });
-
-  // ================= STATE & DATA HANDLING =================
-  let selectedPeriod = 'today';
-  let isMasked = localStorage.getItem('agy_privacy_mask') === 'true' || window.location.search.includes('mask=1') || window.location.search.includes('preview=dummy');
-  let lastData = null;
-
-  const DUMMY_EMAILS = [
-    'dev-lead@example.com',
-    'worker-alpha@example.com',
-    'runner-beta@example.com',
-    'agent-gamma@example.com',
-    'backup-ops@example.com',
-    'standby-pool@example.com'
-  ];
-
-  function getDisplayEmail(email, index = 0) {
-    if (!email) return 'None';
-    if (isMasked) {
-      return DUMMY_EMAILS[index % DUMMY_EMAILS.length];
-    }
-    return email;
-  }
-
-  function getMeterColor(val) {
-    if (val >= 100) return 'var(--agy-danger)';
-    if (val >= 80) return 'var(--agy-warning)';
-    return 'var(--agy-emerald)';
-  }
-
-  function renderTrendGraph(telemetry, periodKey) {
-    const barsGroup = document.getElementById('graphBarsGroup');
-    const xLabels = document.getElementById('graphXLabels');
-    const maxValEl = document.getElementById('graphMaxVal');
-    const periodLabelEl = document.getElementById('graphPeriodLabel');
-    if (!barsGroup) return;
-
-    let items = [];
-    let defaultLabel = '';
-
-    if (periodKey === 'today') {
-      items = (telemetry && telemetry.hourlyToday && telemetry.hourlyToday.length > 0)
-        ? telemetry.hourlyToday
-        : [
-            { label: '04:00', total: 2500000, turns: 30 },
-            { label: '08:00', total: 15000000, turns: 140 },
-            { label: '12:00', total: 32000000, turns: 260 },
-            { label: '16:00', total: 68000000, turns: 520 },
-            { label: '20:00', total: 95000000, turns: 780 },
-            { label: '22:00', total: 108573637, turns: 890 }
-          ];
-      defaultLabel = 'Hourly token velocity (Today · Hover bar for stats)';
-    } else if (periodKey === '7d') {
-      items = [
-        { date: 'Nov 09', total: 18200000, turns: 140 },
-        { date: 'Nov 10', total: 24500000, turns: 190 },
-        { date: 'Nov 11', total: 31000000, turns: 250 },
-        { date: 'Nov 12', total: 42800000, turns: 340 },
-        { date: 'Nov 13', total: 59400000, turns: 480 },
-        { date: 'Nov 14', total: 78200000, turns: 630 },
-        { date: 'Nov 15', total: 108573637, turns: 890 }
-      ];
-      defaultLabel = 'Daily token velocity (Past 7 Days · Rolling Window)';
-    } else if (periodKey === '30d') {
-      items = [
-        { date: 'Oct 18', total: 15000000, turns: 120 },
-        { date: 'Oct 22', total: 22000000, turns: 180 },
-        { date: 'Oct 26', total: 34000000, turns: 270 },
-        { date: 'Oct 30', total: 49000000, turns: 390 },
-        { date: 'Nov 03', total: 63000000, turns: 510 },
-        { date: 'Nov 07', total: 79000000, turns: 640 },
-        { date: 'Nov 11', total: 92000000, turns: 750 },
-        { date: 'Nov 15', total: 108573637, turns: 890 }
-      ];
-      defaultLabel = 'Monthly velocity trend (Past 30 Days)';
-    } else {
-      items = [
-        { date: 'Aug', total: 45000000, turns: 380 },
-        { date: 'Sep', total: 72000000, turns: 590 },
-        { date: 'Oct', total: 94000000, turns: 780 },
-        { date: 'Nov', total: 108573637, turns: 890 }
-      ];
-      defaultLabel = 'All-time aggregated token velocity';
-    }
-
-    periodLabelEl.textContent = defaultLabel;
-
-    const maxTotal = Math.max(...items.map(i => i.total || 0), 1000);
-    maxValEl.textContent = `Peak: ${formatTokens(maxTotal)}`;
-
-    const width = 300;
-    const height = 75;
-    const n = Math.max(items.length, 1);
-    const barWidth = Math.max(5, Math.min(22, (width / n) * 0.65));
-    const step = width / n;
-
-    let svgHtml = '';
-    items.forEach((item, idx) => {
-      const val = item.total || 0;
-      const barHeight = Math.max(4, (val / maxTotal) * (height - 12));
-      const x = idx * step + (step - barWidth) / 2;
-      const y = height - barHeight;
-      const label = item.label || item.date || `T${idx+1}`;
-      const infoStr = `${label}: ${formatTokens(val)} Tokens (${item.turns || 0} turns)`;
-
-      svgHtml += `
-        <rect class="graph-bar" data-info="${infoStr}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="2" fill="url(#barGrad)">
-          <title>${infoStr}</title>
-        </rect>
-        <circle cx="${(x + barWidth/2).toFixed(1)}" cy="${y.toFixed(1)}" r="1.5" fill="#38bdf8"/>
-      `;
-    });
-
-    barsGroup.innerHTML = svgHtml;
-
-    // Interactive Hover & Click on Bars
-    barsGroup.querySelectorAll('.graph-bar').forEach(bar => {
-      bar.addEventListener('mouseenter', (e) => {
-        const info = e.currentTarget.getAttribute('data-info');
-        if (info) periodLabelEl.textContent = info;
-        e.currentTarget.style.filter = 'brightness(1.35) drop-shadow(0 0 5px #38bdf8)';
-      });
-      bar.addEventListener('mouseleave', (e) => {
-        periodLabelEl.textContent = defaultLabel;
-        e.currentTarget.style.filter = '';
-      });
-      bar.addEventListener('click', (e) => {
-        const info = e.currentTarget.getAttribute('data-info');
-        if (info) {
-          periodLabelEl.textContent = info;
-          showToast(info);
-        }
-      });
-    });
-
-    if (items.length > 0) {
-      const first = items[0].label || items[0].date || 'Start';
-      const mid = items[Math.floor(items.length / 2)].label || items[Math.floor(items.length / 2)].date || 'Mid';
-      const last = items[items.length - 1].label || items[items.length - 1].date || 'Latest';
-      xLabels.innerHTML = `<span>${first}</span><span>${mid}</span><span>${last}</span>`;
-    }
-  }
-
-  function renderDashboard(data) {
-    if (!data) return;
-    lastData = data;
-
-    updateHeroSkyline();
-
-    const activeAcc = data.activeAccount;
-    const accounts = data.accounts || [];
-    const telemetry = data.telemetry || null;
-
-    // Extract stats for selected period
-    let pStats = (telemetry && telemetry.periods && telemetry.periods[selectedPeriod]) ? telemetry.periods[selectedPeriod] : null;
-
-    if (!pStats || pStats.total === 0) {
-      pStats = MOCK_DATA.telemetry.periods[selectedPeriod] || MOCK_DATA.telemetry.periods.today;
-    } else if (selectedPeriod !== 'today' && telemetry.periods.today.total === pStats.total) {
-      // If today is the first day recorded, scale realistically across rolling periods
-      const multi = selectedPeriod === '7d' ? 2.6 : (selectedPeriod === '30d' ? 7.5 : 11.2);
-      pStats = {
-        total: Math.round(pStats.total * multi),
-        input: Math.round(pStats.input * multi),
-        output: Math.round(pStats.output * multi),
-        cache: Math.round(pStats.cache * multi),
-        turns: Math.round(pStats.turns * multi),
-        hitRate: pStats.hitRate,
-        cost: pStats.cost * multi,
-        savings: pStats.savings * multi
-      };
-    }
-
-    const sUsed = activeAcc ? Math.min(100, Math.round(activeAcc.sessionUsed || 0)) : 0;
-    const wUsed = activeAcc ? Math.min(100, Math.round(activeAcc.weeklyUsed || 0)) : 0;
-    const totalAcc = accounts.length || 6;
-    const availAcc = accounts.filter(a => !a.isExhausted).length || (totalAcc - 1);
-
-    // 1. Hero Dynamic Stat
-    document.getElementById('heroMainNum').textContent = formatTokens(pStats.total);
-    document.getElementById('heroMainLabel').textContent = `Tokens · ${pStats.hitRate.toFixed(1)}% Cache Hit`;
-    document.getElementById('heroSubNum').textContent = `Cost: ${formatCost(pStats.cost)} · Saved: ${formatCost(pStats.savings)}`;
-
-    // 2. Active Route Chip
-    const activeEmail = activeAcc ? getDisplayEmail(activeAcc.email, 0) : 'None';
-    document.getElementById('srcRouteTitle').textContent = `Target Sesi: ${activeEmail} (${sUsed}% terpakai)`;
-    const isAgyActive = data.activeSession?.isAntigravityActive;
-    const model = data.activeSession?.model || 'Gemini (Antigravity)';
-    const dot = document.querySelector('.status-dot');
-    if (dot) {
-      dot.style.background = isAgyActive ? 'var(--agy-emerald)' : '#64748b';
-      dot.style.boxShadow = isAgyActive ? '0 0 6px var(--agy-emerald)' : 'none';
-    }
-    document.getElementById('srcTargetSub').textContent = isAgyActive
-      ? `${model} · Auto-resume aktif`
-      : 'Standby · Tidak ada terminal Antigravity';
-
-    // 3. 2-Column KPI Cards
-    document.getElementById('kpiTotalTokens').textContent = formatTokens(pStats.total);
-    document.getElementById('kpiInputOutput').textContent = `In: ${formatTokens(pStats.input)} · Out: ${formatTokens(pStats.output)}`;
-    document.getElementById('kpiTurns').textContent = `${pStats.turns || 0} turns`;
-
-    document.getElementById('kpiCost').textContent = formatCost(pStats.cost);
-    document.getElementById('kpiSavings').textContent = `Saved ${formatCost(pStats.savings)}`;
-
-    document.getElementById('kpiHitRate').textContent = `${pStats.hitRate.toFixed(1)}%`;
-    document.getElementById('kpiHitBar').style.width = `${Math.min(100, pStats.hitRate)}%`;
-    document.getElementById('kpiCacheTokens').textContent = `${formatTokens(pStats.cache)} cached tokens`;
-
-    document.getElementById('kpiSessionQuota').textContent = `${sUsed}%`;
-    const sBar = document.getElementById('kpiSessionBar');
-    sBar.style.width = `${sUsed}%`;
-    sBar.style.background = getMeterColor(sUsed);
-    document.getElementById('kpiFleetReady').textContent = `${availAcc}/${totalAcc} ready`;
-
-    // 4. Token Velocity Trend Graph
-    renderTrendGraph(telemetry, selectedPeriod);
-
-    // 5. Token Allocation Mix (Horizontal track & Donut)
-    const tot = pStats.total || 1;
-    const cachePct = (pStats.cache / tot) * 100;
-    const inputPct = (pStats.input / tot) * 100;
-    const outputPct = (pStats.output / tot) * 100;
-
-    document.getElementById('segCache').style.width = `${cachePct}%`;
-    document.getElementById('segInput').style.width = `${inputPct}%`;
-    document.getElementById('segOutput').style.width = `${outputPct}%`;
-
-    document.getElementById('donutCenterPct').textContent = `${pStats.hitRate.toFixed(0)}%`;
-    // Circumference = 2 * PI * 38 = ~238.7
-    const circ = 238.7;
-    const dashFill = (Math.min(100, pStats.hitRate) / 100) * circ;
-    document.getElementById('donutCircleFill').style.strokeDasharray = `${dashFill.toFixed(1)} ${circ}`;
-
-    document.getElementById('legendCacheVal').textContent = `${formatTokens(pStats.cache)} (${cachePct.toFixed(1)}%)`;
-    document.getElementById('legendInputVal').textContent = `${formatTokens(pStats.input)} (${inputPct.toFixed(1)}%)`;
-    document.getElementById('legendOutputVal').textContent = `${formatTokens(pStats.output)} (${outputPct.toFixed(1)}%)`;
-
-    // 6. Account Fleet Ranking Table
-    const tbody = document.getElementById('fleetTableBody');
-    if (tbody) tbody.innerHTML = '';
-    const fleetCountEl = document.getElementById('fleetTableCount');
-    if (fleetCountEl) fleetCountEl.textContent = `${totalAcc} accounts`;
-
-    accounts.forEach((acc, idx) => {
-      const tr = document.createElement('tr');
-      if (acc.isActive) {
-        tr.className = 'active-row';
-        tr.style.cursor = 'default';
-      } else {
-        tr.style.cursor = 'pointer';
-        tr.title = `Click row to switch route to ${acc.email}`;
-      }
-
-      let pillHtml = '';
-      if (acc.isActive) {
-        pillHtml = '<span class="pill pill-active">● IN USE</span>';
-      } else if (acc.isExhausted) {
-        pillHtml = '<span class="pill pill-limit">✕ LIMIT</span>';
-      } else {
-        pillHtml = '<span class="pill pill-ready">○ READY</span>';
-      }
-
-      const sVal = Math.min(100, Math.round(acc.sessionUsed || 0));
-      const wVal = Math.min(100, Math.round(acc.weeklyUsed || 0));
-      const sColor = getMeterColor(acc.sessionUsed || 0);
-      const wColor = getMeterColor(acc.weeklyUsed || 0);
-      const email = getDisplayEmail(acc.email, idx);
-      const resetStr = formatMinutes(acc.earliestReset);
-
-      const actionHtml = acc.isActive
-        ? '<span class="active-tag">ACTIVE</span>'
-        : `<button class="btn-select" data-email="${acc.email}">Select</button>`;
-
-      tr.innerHTML = `
-        <td class="rank-num">${idx + 1}</td>
-        <td>
-          <div class="acc-col">
-            <div class="acc-header">
-              ${pillHtml}
-              <span class="acc-email-txt" title="${email}">${email}</span>
-            </div>
-            <div class="acc-reset-txt">Reset: ${resetStr}</div>
-          </div>
-        </td>
-        <td>
-          <div class="meter-inline">
-            <div class="meter-track"><div class="meter-fill" style="width:${sVal}%; background:${sColor};"></div></div>
-            <span class="meter-num" style="color:${sColor};">${sVal}%</span>
-          </div>
-        </td>
-        <td>
-          <div class="meter-inline">
-            <div class="meter-track"><div class="meter-fill" style="width:${wVal}%; background:${wColor};"></div></div>
-            <span class="meter-num" style="color:${wColor};">${wVal}%</span>
-          </div>
-        </td>
-        <td style="text-align:right;">
-          ${actionHtml}
-        </td>
-      `;
-
-      // Bind row click
-      if (!acc.isActive) {
-        tr.addEventListener('click', (e) => {
-          if (e.target.closest('.btn-select')) return;
-          selectAccount(acc.email, tr.querySelector('.btn-select'));
-        });
-      }
-
-      // Bind button click
-      const btn = tr.querySelector('.btn-select');
-      if (btn) {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const em = e.currentTarget.getAttribute('data-email');
-          selectAccount(em, e.currentTarget);
-        });
-      }
-
-      tbody.appendChild(tr);
-    });
-
-    const now = new Date();
-    document.getElementById('footerSyncStatus').textContent = `Sync: ${now.toLocaleTimeString()} · Real-time 3.5s`;
-  }
-
-  // ================= EVENT HANDLERS & LISTENERS =================
-
-  // Period Toggle Buttons
-  document.querySelectorAll('.period-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      document.querySelectorAll('.period-btn').forEach(b => b.setAttribute('aria-checked', 'false'));
-      const target = e.currentTarget;
-      target.setAttribute('aria-checked', 'true');
-      selectedPeriod = target.getAttribute('data-period') || 'today';
-      if (lastData) renderDashboard(lastData);
-    });
-  });
-
-  // Privacy Mask UI
-  function updateMaskButtonUI() {
-    const btnText = document.getElementById('maskBtnText');
-    const btn = document.getElementById('btnMask');
-    if (btnText) btnText.textContent = isMasked ? 'Mask: ON' : 'Mask: OFF';
-    if (btn) {
-      if (isMasked) {
-        btn.style.borderColor = 'var(--agy-emerald-border)';
-        btn.style.color = '#34d399';
-      } else {
-        btn.style.borderColor = 'var(--border)';
-        btn.style.color = 'var(--fg)';
-      }
-    }
-  }
-  updateMaskButtonUI();
-  // Sync initial mask state with worker so status bar is masked
-  rpc('mask.set', { masked: isMasked }).catch(() => {});
-
-  document.getElementById('btnMask').addEventListener('click', () => {
-    isMasked = !isMasked;
-    localStorage.setItem('agy_privacy_mask', isMasked);
-    updateMaskButtonUI();
-    if (lastData) renderDashboard(lastData);
-    rpc('mask.set', { masked: isMasked }).catch(() => {});
-    showToast(isMasked ? 'Privacy Mask ON (Emails & Status Bar masked)' : 'Privacy Mask OFF (Real emails shown)');
-  });
-
-  const MOCK_DATA = {
-    accounts: [
-      { id: 'acc_1', email: 'dev-lead@example.com', isActive: true, sessionUsed: 0, weeklyUsed: 0, earliestReset: Date.now() + 15200000 },
-      { id: 'acc_2', email: 'worker-alpha@example.com', isActive: false, sessionUsed: 12, weeklyUsed: 8, earliestReset: Date.now() + 12000000 },
-      { id: 'acc_3', email: 'runner-beta@example.com', isActive: false, sessionUsed: 35, weeklyUsed: 22, earliestReset: Date.now() + 9000000 },
-      { id: 'acc_4', email: 'agent-gamma@example.com', isActive: false, sessionUsed: 58, weeklyUsed: 44, earliestReset: Date.now() + 6000000 },
-      { id: 'acc_5', email: 'backup-ops@example.com', isActive: false, sessionUsed: 82, weeklyUsed: 75, earliestReset: Date.now() + 3000000 },
-      { id: 'acc_6', email: 'standby-pool@example.com', isActive: false, sessionUsed: 100, weeklyUsed: 100, isExhausted: true, earliestReset: Date.now() + 1200000 }
-    ],
-    activeId: 'acc_1',
-    activeAccount: { id: 'acc_1', email: 'dev-lead@example.com', isActive: true, sessionUsed: 0, weeklyUsed: 0, earliestReset: Date.now() + 15200000 },
-    activeSession: { model: 'Gemini 2.5 Pro / Paid Pool' },
-    telemetry: {
-      periods: {
-        today: { total: 108573637, input: 3344114, output: 516726, cache: 104712797, turns: 890, hitRate: 96.4, cost: 38.18, savings: 99.45 },
-        '7d': { total: 108573637, input: 3344114, output: 516726, cache: 104712797, turns: 890, hitRate: 96.4, cost: 38.18, savings: 99.45 },
-        '30d': { total: 108573637, input: 3344114, output: 516726, cache: 104712797, turns: 890, hitRate: 96.4, cost: 38.18, savings: 99.45 },
-        all: { total: 108573637, input: 3344114, output: 516726, cache: 104712797, turns: 890, hitRate: 96.4, cost: 38.18, savings: 99.45 }
-      },
-      daily: [
-        { date: '11-11', total: 14000000, turns: 120 },
-        { date: '11-12', total: 25000000, turns: 210 },
-        { date: '11-13', total: 38000000, turns: 310 },
-        { date: '11-14', total: 62000000, turns: 510 },
-        { date: '11-15', total: 108573637, turns: 890 }
-      ],
-      hourlyToday: [
-        { label: '04:00', total: 2500000, turns: 30 },
-        { label: '08:00', total: 15000000, turns: 140 },
-        { label: '12:00', total: 32000000, turns: 260 },
-        { label: '16:00', total: 68000000, turns: 520 },
-        { label: '20:00', total: 95000000, turns: 780 },
-        { label: '22:00', total: 108573637, turns: 890 }
-      ]
-    }
-  };
-
-  async function loadData() {
+  async function action(method, payload, success = '') {
+    if (!host || busy) return;
+    busy = true;
+    message('');
+    render();
     try {
-      const res = await rpc('accounts.read');
-      const state = (res && res.value !== undefined) ? res.value : res;
-      renderDashboard(state);
-    } catch (err) {
-      if (!lastData) {
-        renderDashboard(MOCK_DATA);
-      }
-    }
-  }
-
-  async function selectAccount(email, buttonEl = null) {
-    if (!email) return;
-    if (buttonEl) {
-      buttonEl.disabled = true;
-      buttonEl.textContent = '...';
-    }
-    showToast(`Switching to ${email}...`);
-    try {
-      await rpc('accounts.selectTarget', { target: email });
-      showToast(`Switched active route to: ${email}`);
-      await loadData();
-    } catch (err) {
-      showToast(`Switch error: ${err.message}`, true);
+      const result = await host.request(method, payload, { timeoutMs: 45_000 });
+      if (method === 'accounts.refresh') receive(result);
+      else if (!result?.success) message(result?.reason ?? '操作未完成。', true);
+      else message(success);
+    } catch {
+      message('无法与插件通信，请重试。', true);
     } finally {
-      if (buttonEl) {
-        buttonEl.disabled = false;
-        buttonEl.textContent = 'Select';
-      }
+      busy = false;
+      render();
     }
   }
 
-  document.getElementById('btnRefresh').addEventListener('click', (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    loadData().finally(() => { setTimeout(() => { btn.disabled = false; }, 350); });
-  });
-
-  document.getElementById('btnRotate').addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    const orig = btn.innerHTML;
-    btn.innerHTML = 'Rotating...';
+  async function loadStats() {
+    if (statsPending) return;
+    statsPending = true;
+    $('stats').hidden = true;
+    $('stats-message').textContent = '正在读取用量…';
     try {
-      showToast('Selecting account with lowest quota...');
-      const res = await rpc('accounts.rotateNow');
-      const result = (res && res.value !== undefined) ? res.value : res;
-      if (result && result.success) {
-        showToast(`Switched to ${result.newEmail}`);
+      const usage = await host.request('telemetry.read', null, { timeoutMs: 30_000 });
+      if (usage?.status === 'ok') {
+        const items = [
+          ['总词元', nf.format(usage.total)], ['输入', nf.format(usage.input)],
+          ['输出', nf.format(usage.output)], ['缓存读取', nf.format(usage.cache)],
+          ['有用量的记录', nf.format(usage.records)], ['估算费用（非账单）', usd.format(usage.cost)],
+        ];
+        $('stats').replaceChildren(...items.map(([key, value]) => {
+          const item = node('div');
+          item.append(node('dt', key, 'quiet'), node('dd', value, 'number'));
+          return item;
+        }));
+        $('stats').hidden = false;
+        $('stats-message').textContent = usage.partial ? '部分记录无法读取，统计可能不完整。' : '';
       } else {
-        showToast(`Rotation skipped: ${result?.reason || 'All accounts exhausted'}`, true);
+        $('stats-message').textContent = usage?.status === 'empty' ? '暂无用量记录。' : '无法读取用量记录。';
       }
-      await loadData();
-    } catch (err) {
-      showToast(`Error: ${err.message}`, true);
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = orig;
-    }
-  });
-
-  // Real-time Event Subscription
-  function setupRealtimeListener() {
-    const host = window.orca || globalThis.orca;
-    if (host && host.plugin && typeof host.plugin.on === 'function') {
-      host.plugin.on('accounts.changed', (payload) => {
-        const data = (payload && payload.value !== undefined) ? payload.value : payload;
-        renderDashboard(data);
-      });
-    }
+    } catch {
+      $('stats-message').textContent = '无法读取用量记录。';
+    } finally { statsPending = false; }
   }
 
-  let attempts = 0;
-  function tryInit() {
-    if (window.orca || globalThis.orca || attempts > 10) {
-      setupRealtimeListener();
-      loadData();
-    } else {
-      attempts++;
-      setTimeout(tryInit, 200);
+  $('refresh').addEventListener('click', () => action('accounts.refresh'));
+  $('recommend').addEventListener('click', () => action('accounts.rotateNow', undefined, '已切换到推荐账号。'));
+  $('pool').addEventListener('change', (event) => action('preferences.set', { pool: event.target.value || null }));
+  $('auto').addEventListener('change', (event) => action('preferences.set', { auto: event.target.checked }));
+  $('mask').addEventListener('change', (event) => action('preferences.set', { masked: event.target.checked }));
+  $('usage').addEventListener('toggle', () => { if ($('usage').open && host) void loadStats(); });
+
+  async function connect() {
+    host = globalThis.orca?.plugin;
+    if (!host) {
+      $('sync').textContent = '未连接到 Orca。';
+      $('empty').textContent = '请在 Orca 中打开此面板。';
+      return;
+    }
+    $('refresh').disabled = false;
+    try {
+      host.on('accounts.changed', receive);
+      receive(await host.request('accounts.read'));
+    } catch {
+      if (state) return;
+      $('sync').textContent = '无法读取插件状态。';
+      $('empty').textContent = '请点击刷新重试。';
     }
   }
-  tryInit();
-
-  // Fast polling fallback & Clock updates
-  setInterval(loadData, 3500);
-  setInterval(updateHeroSkyline, 60000);
+  void connect();
 </script>
 </body>
 </html>
