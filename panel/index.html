@@ -52,10 +52,10 @@
   .quiet { color: var(--quiet); font-size: 12px; }
   .row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-  button, select { min-height: 30px; max-width: 100%; padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--card-fg); font: inherit; }
+  button { min-height: 30px; max-width: 100%; padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--card-fg); font: inherit; }
   button, summary { cursor: pointer; }
-  button:not(:disabled):hover, select:not(:disabled):hover { background: var(--accent); color: var(--accent-fg); }
-  button:disabled, select:disabled { cursor: default; background: var(--muted); color: var(--quiet); }
+  button:not(:disabled):hover { background: var(--accent); color: var(--accent-fg); }
+  button:disabled { cursor: default; background: var(--muted); color: var(--quiet); }
   .primary:not(:disabled) { background: var(--primary); color: var(--primary-fg); }
   .primary:not(:disabled):hover { filter: brightness(.9); }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -84,6 +84,8 @@
   .fill.low { background: var(--warning); }
   .fill.old { background: var(--quiet); }
   .stats dd { font-weight: 600; overflow-wrap: anywhere; }
+  .rules { margin: 0; padding-inline-start: 20px; }
+  .rules li + li { margin-top: 4px; }
   footer { border-top: 1px solid var(--border); padding-top: 9px; }
   [hidden] { display: none !important; }
   @media (max-width: 340px) {
@@ -96,7 +98,7 @@
 <main>
   <header>
     <div class="row">
-      <h1>账号额度</h1>
+      <h1>Gemini 账号额度</h1>
       <div class="actions">
         <button id="refresh" type="button" disabled>刷新</button>
         <button id="recommend" class="primary" type="button" aria-describedby="recommendation" disabled>切换推荐账号</button>
@@ -113,16 +115,10 @@
     <h2 id="current-title">本机当前账号</h2>
     <p id="current" class="current">—</p>
     <p class="quiet">当前模型：<span id="model">暂无法读取</span></p>
+    <p id="next" class="quiet" role="status">下一候选：等待读取账号</p>
     <div class="controls">
-      <label class="control" for="pool">监控额度池
-        <select id="pool" disabled>
-          <option value="">未选择</option>
-          <option value="gemini">Gemini</option>
-          <option value="claude-gpt">Claude / GPT</option>
-        </select>
-      </label>
       <label class="control"><input id="auto" type="checkbox" disabled> 自动轮换</label>
-      <label class="control"><input id="mask" type="checkbox" checked disabled> 隐藏账号</label>
+      <label class="control"><input id="mask" type="checkbox" disabled> 隐藏邮箱</label>
     </div>
     <p id="policy" class="quiet">等待账号数据</p>
   </section>
@@ -136,6 +132,16 @@
     <p id="empty" class="quiet">正在读取账号…</p>
   </section>
 
+  <details class="box">
+    <summary>账号切换规则</summary>
+    <ul class="quiet rules">
+      <li>只看 Gemini 的 5 小时和每周额度。综合分以 5 小时剩余为基础，周额度越低扣分越多，临近周重置会减轻扣分；每周剩余低于 20% 额外扣分。</li>
+      <li>「下一候选」是额度有效、两个窗口都高于 <span id="reserve-floor">5</span>% 的最高分备用账号，是预览，不代表马上切换。同分时优先 5 小时剩余更多的账号。</li>
+      <li>开启自动轮换后，只有当前账号任一窗口剩余 ≤<span id="auto-floor">5</span>%，且有合格备用账号，才考虑切换。未确认本机聊天使用这组账号、额度未知或过期、处于冷却时都不会自动切换。</li>
+      <li>「切换推荐账号」会重新读取额度；当前账号最合适时不会强制切走。也可通过账号行的「切换」手动指定。</li>
+    </ul>
+  </details>
+
   <details id="usage" class="box">
     <summary>用量统计</summary>
     <p class="quiet">近 24 小时 · 本机可读取的 Antigravity 会话记录，不按账号区分。</p>
@@ -148,6 +154,8 @@
 <script>
   const $ = (id) => document.getElementById(id);
   const nf = new Intl.NumberFormat('zh-CN');
+  const scoreFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
+  const scoreText = (score) => scoreFormat.format(score * 100) + ' 分';
   const usd = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD' });
   const stamp = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   function node(tag, text, cls) {
@@ -167,19 +175,30 @@
     render();
   }
 
-  function meter(title, quota, live) {
+  function resetCountdown(resetsAt, now) {
+    if (!Number.isFinite(resetsAt)) return '—';
+    const minutes = Math.max(0, Math.ceil((resetsAt - now) / 60_000));
+    const days = Math.floor(minutes / 1440);
+    const hours = Math.floor(minutes / 60) % 24;
+    const rest = String(minutes % 60).padStart(2, '0');
+    if (days) return `${days}d${hours}h${rest}m`;
+    return hours ? `${hours}h${rest}m` : `${minutes}m`;
+  }
+
+  function meter(title, quota, live, lowQuota, now) {
     const box = node('div');
     const head = node('div', null, 'meter-head');
     head.append(node('span', title, 'quiet'), node('strong', quota ? `${quota.remaining}%` : '未知', 'number'));
     const track = node('div', null, 'track');
     track.setAttribute('aria-hidden', 'true');
     if (quota) {
-      const fill = node('div', null, `fill${!live || !quota.valid ? ' old' : quota.remaining <= 5 ? ' low' : ''}`);
+      const fill = node('div', null, `fill${!live || !quota.valid ? ' old' : quota.remaining <= lowQuota ? ' low' : ''}`);
       fill.style.width = `${quota.remaining}%`;
       track.append(fill);
     }
-    const reset = quota?.resetsAt ? `${stamp.format(quota.resetsAt)} 重置` : '重置时间未知';
-    box.append(head, track, node('div', reset, 'quiet'));
+    const reset = node('div', resetCountdown(quota?.resetsAt, now), 'quiet number');
+    reset.title = Number.isFinite(quota?.resetsAt) ? '距额度重置的剩余时间' : '重置时间未知';
+    box.append(head, track, reset);
     return box;
   }
 
@@ -189,12 +208,12 @@
     const live = hasData && !state?.error;
     $('refresh').disabled = blocked || !host;
     $('recommend').disabled = blocked || !live || !state?.recommendedId;
-    $('auto').disabled = blocked || !state?.pool;
-    $('mask').disabled = $('pool').disabled = blocked || !state;
+    $('auto').disabled = $('mask').disabled = blocked || !state;
     if (!state) return;
-    $('pool').value = state.pool ?? '';
-    $('auto').checked = state.auto;
-    $('mask').checked = state.masked;
+    if (!busy) {
+      $('auto').checked = state.auto;
+      $('mask').checked = state.masked;
+    }
     $('sync').textContent = state.switching ? '正在切换账号…' : hasData
       ? `${state.error ? '上次成功同步' : '同步于'} ${stamp.format(state.syncedAt)} · 每 ${state.intervalSeconds} 秒检查`
       : state.error ? '尚未成功同步' : '正在读取账号…';
@@ -204,6 +223,10 @@
       (live ? '未识别到当前账号' : '—');
     $('model').textContent = state.model || '暂无法读取';
     $('policy').textContent = state.policy;
+    const next = live && state.accounts.find((item) => item.id === state.nextId);
+    $('next').textContent = next ? `下一候选：${next.label} · ${scoreText(next.score)}`
+      : `下一候选：${state.error ? '账号读取失败' : !hasData ? '等待读取账号' : '暂无符合条件的候选'}`;
+    $('reserve-floor').textContent = $('auto-floor').textContent = state.lowQuota;
     $('recommendation').textContent = state.recommendation ?? '';
     $('recommendation').hidden = !state.recommendation;
     $('count').textContent = hasData ? `${state.accounts.length} 个` : '';
@@ -216,11 +239,14 @@
     const list = $('accounts');
     const focusedId = document.activeElement?.dataset.account;
     const fragment = document.createDocumentFragment();
+    const now = Date.now();
     let focusTarget;
     const rows = [...state.accounts].sort((a, b) =>
       Number(b.active) - Number(a.active) ||
-      Number(b.id === state.recommendedId) - Number(a.id === state.recommendedId) ||
-      (b.score ?? -1) - (a.score ?? -1));
+      Number(b.id === state.nextId) - Number(a.id === state.nextId) ||
+      (b.score ?? -1) - (a.score ?? -1) ||
+      (b.fiveHour?.remaining ?? -1) - (a.fiveHour?.remaining ?? -1) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     for (const item of rows) {
       const row = node('li', null, 'account box');
       row.dataset.active = item.active;
@@ -228,10 +254,11 @@
       const identity = node('div', null, 'account-id');
       identity.append(node('span', item.label, 'account-name'));
       if (item.active) identity.append(node('span', '当前', 'badge good'));
-      if (item.id === state.recommendedId) identity.append(node('span', '推荐', 'badge good'));
-      if (item.low && live) identity.append(node('span', '额度低', 'badge low'));
-      if (state.pool && (!item.fiveHour || !item.weekly)) identity.append(node('span', '额度未知', 'badge'));
-      else if (state.pool && (!item.valid || !live)) identity.append(node('span', '数据已过期', 'badge'));
+      if (item.id === state.nextId) identity.append(node('span', '下一候选', 'badge good'));
+      if (live && item.low) identity.append(node('span', '额度低', 'badge low'));
+      if (!item.fiveHour || !item.weekly) identity.append(node('span', '额度未知', 'badge'));
+      else if (!item.valid || !live) identity.append(node('span', '额度快照不可用于切换', 'badge'));
+      identity.append(node('span', live && item.score != null ? `综合分 ${scoreText(item.score)}` : '暂无综合分', 'badge number'));
       heading.append(identity);
       if (!item.active) {
         const button = node('button', '切换');
@@ -244,11 +271,10 @@
         if (focusedId === item.id && !button.disabled) focusTarget = button;
       }
       row.append(heading);
-      if (state.pool) {
-        const meters = node('div', null, 'meters');
-        meters.append(meter('5 小时剩余', item.fiveHour, live), meter('每周剩余', item.weekly, live));
-        row.append(meters, node('p', item.updatedAt ? `额度读于 ${stamp.format(item.updatedAt)}` : '暂无额度读数', 'quiet'));
-      }
+      const meters = node('div', null, 'meters');
+      meters.append(meter('5 小时剩余', item.fiveHour, live, state.lowQuota, now),
+        meter('每周剩余', item.weekly, live, state.lowQuota, now));
+      row.append(meters, node('p', item.updatedAt ? `额度读于 ${stamp.format(item.updatedAt)}` : '暂无额度读数', 'quiet'));
       fragment.append(row);
     }
     list.replaceChildren(fragment);
@@ -308,7 +334,6 @@
 
   $('refresh').addEventListener('click', () => action('accounts.refresh'));
   $('recommend').addEventListener('click', () => action('accounts.rotateNow', undefined, '已切换到推荐账号。'));
-  $('pool').addEventListener('change', (event) => action('preferences.set', { pool: event.target.value || null }));
   $('auto').addEventListener('change', (event) => action('preferences.set', { auto: event.target.checked }));
   $('mask').addEventListener('change', (event) => action('preferences.set', { masked: event.target.checked }));
   $('usage').addEventListener('toggle', () => { if ($('usage').open && host) void loadStats(); });

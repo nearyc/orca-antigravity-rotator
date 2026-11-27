@@ -3,14 +3,7 @@ export const ACTIVE_MAX_AGE = 10 * 60_000;
 export const RESERVE_MAX_AGE = 5 * 60 * 60_000;
 const THREE_DAYS = 3 * 24 * 60 * 60_000;
 
-export const POOLS = Object.freeze({
-  gemini: 'Gemini Models',
-  'claude-gpt': 'Claude and GPT models',
-});
-
-export function isPool(value) {
-  return typeof value === 'string' && Object.hasOwn(POOLS, value);
-}
+export const GEMINI_GROUP = 'Gemini Models';
 
 function readWindow(buckets, minutes, now, fresh) {
   const matches = buckets.filter((item) => item.windowMinutes === minutes);
@@ -28,14 +21,13 @@ export function scoreQuota(fiveHour, weekly, resetsAt, now) {
   return (fiveHour / 100) * Math.max(0.35, Math.min(1.15, factor)) * Math.min(1, weekly / 20);
 }
 
-export function rankAccounts(result, pool, now) {
-  const group = isPool(pool) ? POOLS[pool] : null;
+export function rankAccounts(result, now) {
   const accounts = result.accounts.map(({ id, email, usage }, index) => {
     const active = id === result.activeAccountId;
     const updatedAt = Number.isFinite(usage?.updatedAt) && usage.updatedAt > 0 ? usage.updatedAt : null;
     const maxAge = active ? ACTIVE_MAX_AGE : RESERVE_MAX_AGE;
     const fresh = updatedAt !== null && updatedAt <= now && now - updatedAt <= maxAge && usage?.status === 'ok';
-    const buckets = group && Array.isArray(usage?.buckets) ? usage.buckets.filter((item) => item?.group === group) : [];
+    const buckets = Array.isArray(usage?.buckets) ? usage.buckets.filter((item) => item?.group === GEMINI_GROUP) : [];
     const fiveHour = readWindow(buckets, 300, now, fresh);
     const weekly = readWindow(buckets, 10080, now, fresh);
     const valid = !!(fiveHour?.valid && weekly?.valid);

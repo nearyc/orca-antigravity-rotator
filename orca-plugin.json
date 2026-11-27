@@ -5,7 +5,7 @@
   "publisher": "syharipf",
   "name": "Antigravity 账号切换",
   "version": "1.0.0",
-  "description": "查看本机 Antigravity 账号的 5 小时及每周剩余额度，按所选额度池推荐账号，并可开启低额度自动轮换。",
+  "description": "查看本机 Antigravity 账号的 Gemini 剩余额度和综合评分，推荐候补账号，并可开启低额度自动轮换。",
   "license": "MIT",
   "author": { "name": "syharipf" },
   "repository": "https://github.com/Syharipf/orca-agy-rotator",

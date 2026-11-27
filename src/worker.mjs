@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, win32 } from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
-import { isPool, rankAccounts } from './quota-policy.mjs';
+import { LOW_QUOTA, rankAccounts } from './quota-policy.mjs';
 
 const exec = promisify(execFile);
 const LIST = ['account', 'list', '--agent', 'antigravity', '--json'];
@@ -148,7 +148,7 @@ const refusal = (reason) => ({ success: false, reason });
 const explain = (err, fallback) => err instanceof OrcaFailure ? err.message : fallback;
 
 export function createWorker(orca, { run = runOrca, now = Date.now, schedule = setInterval, cancel = clearInterval } = {}) {
-  let prefs = { pool: null, auto: false, masked: true };
+  let prefs = { auto: false, masked: false };
   let raw = null;
   let syncedAt = null;
   let error = null;
@@ -164,7 +164,11 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
   const telemetry = createTelemetry(now);
 
   const ready = Promise.resolve().then(() => orca.storage.get(PREF_KEY)).then((saved) => {
-    prefs = { pool: isPool(saved?.pool) ? saved.pool : null, auto: saved?.auto === true, masked: saved?.masked !== false };
+    // A previously enabled Claude/GPT policy must not silently enable Gemini rotation.
+    prefs = {
+      auto: saved?.auto === true && (saved.pool === undefined || saved.pool === 'gemini'),
+      masked: saved?.masked === true,
+    };
   }).catch(() => orca.log('无法读取面板偏好，已使用安全默认值。'));
 
   function limitation(at) {
@@ -177,32 +181,31 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
   function snapshot() {
     const at = now();
     const { accounts, current, best, alternative } = raw
-      ? rankAccounts(raw, prefs.pool, at)
+      ? rankAccounts(raw, at)
       : { accounts: [], current: null, best: null, alternative: null };
     const limit = limitation(at);
     let policy;
     if (!prefs.auto) policy = '自动轮换未开启';
-    else if (!prefs.pool) policy = '请选择监控额度池';
     else if (paused) policy = '上次切换未确认；关闭后重新开启可恢复自动轮换';
     else if (error || !raw) policy = '等待成功读取账号';
     else if (!raw.chatUsesAgy) policy = '未确认本机聊天使用这组账号，自动轮换暂停';
     else if (!current?.valid) policy = '等待当前账号的有效额度';
     else if (limit) policy = limit;
-    else if (!current.low) policy = '监控中：任一窗口剩余不超过 5% 时才考虑切换';
+    else if (!current.low) policy = `监控中：任一窗口剩余不超过 ${LOW_QUOTA}% 时才考虑切换`;
     else if (!alternative) policy = '当前额度低，暂无额度充足的备用账号';
     else policy = '当前额度低，等待下一次自动检查';
     const recommendedId = !error && !limit && best && !best.active ? best.id : null;
     const recommendation = error ? '账号读取失败，无法推荐。'
       : !raw ? '正在读取账号。'
       : !accounts.length ? '尚未保存账号。'
-      : !prefs.pool ? '请选择监控额度池以查看剩余额度和推荐账号。'
       : limit ?? (!best ? '暂无额度数据有效且充足的账号。'
-        : best.active ? '当前账号已是推荐账号。' : null);
+        : best.active ? '当前账号评分最高，无需立即切换。' : null);
     return {
-      revision, syncedAt, error, switching, pool: prefs.pool, auto: prefs.auto, masked: prefs.masked,
-      intervalSeconds: POLL_SECONDS, policy, model: null, recommendedId, recommendation,
+      revision, syncedAt, error, switching, auto: prefs.auto, masked: prefs.masked,
+      intervalSeconds: POLL_SECONDS, lowQuota: LOW_QUOTA, policy, model: null, recommendedId, recommendation,
+      nextId: !error && current ? alternative?.id ?? null : null,
       accounts: accounts.map(({ id, email, index, active, updatedAt, fiveHour, weekly, valid, low, score }) => ({
-        id, label: (prefs.masked ? null : email) || `账号 ${index + 1}`,
+        id, label: prefs.masked ? `账号 ${index + 1}` : email || `账号 ${index + 1}（邮箱未提供）`,
         active, updatedAt, fiveHour, weekly, valid, low, score,
       })),
     };
@@ -296,9 +299,9 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     if (operation) return operation.then(snapshot);
     return exclusive(async () => {
       await ready;
-      if (disposed || !(await readAccounts()) || !checkAuto || !prefs.auto || !prefs.pool ||
+      if (disposed || !(await readAccounts()) || !checkAuto || !prefs.auto ||
         paused || saving || !raw.chatUsesAgy || limitation(now())) return;
-      const { current, alternative } = rankAccounts(raw, prefs.pool, now());
+      const { current, alternative } = rankAccounts(raw, now());
       if (current?.low && alternative) await select(alternative.id, true);
     }).then(snapshot);
   }
@@ -313,8 +316,7 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
       if (limit) return refusal(limit);
       if (mode === 'recommended') {
         if (!raw.accounts.length) return refusal('尚未在 Orca 中保存账号。');
-        if (!prefs.pool) return refusal('请先选择监控额度池。');
-        const { best } = rankAccounts(raw, prefs.pool, now());
+        const { best } = rankAccounts(raw, now());
         if (!best) return refusal('没有额度数据有效且充足的账号。');
         if (best.active) return refusal('当前账号已经是最合适的账号。');
         targetId = best.id;
@@ -329,15 +331,8 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     await ready;
     if (saving || switching || disposed) return refusal('当前无法更新偏好。');
     const next = { ...prefs };
-    if (input?.pool === null || isPool(input?.pool)) {
-      if (prefs.pool !== input.pool) next.auto = false;
-      next.pool = input.pool;
-    }
     if (typeof input?.masked === 'boolean') next.masked = input.masked;
-    if (typeof input?.auto === 'boolean') {
-      if (input.auto && !next.pool) return refusal('请先选择监控额度池。');
-      next.auto = input.auto;
-    }
+    if (typeof input?.auto === 'boolean') next.auto = input.auto;
     saving = true;
     try {
       await orca.storage.set(PREF_KEY, next);

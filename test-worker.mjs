@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorker, orcaCommandEnv, parseAccountResult, resolveOrcaBinary } from './src/worker.mjs';
-import { POOLS, rankAccounts, scoreQuota } from './src/quota-policy.mjs';
+import { GEMINI_GROUP, rankAccounts, scoreQuota } from './src/quota-policy.mjs';
+
+const OTHER_GROUP = 'Claude and GPT models';
 
 const NOW = 1_800_000_000_000;
 const HOUR = 3_600_000;
@@ -11,10 +13,10 @@ function account(id, short, week, updatedAt = NOW) {
   return { id, email: `${id}@example.test`, usage: {
     status: 'ok', updatedAt,
     buckets: [
-      bucket(POOLS.gemini, 300, short),
-      bucket(POOLS.gemini, 10080, week, NOW + 100 * HOUR),
-      bucket(POOLS['claude-gpt'], 300, 100),
-      bucket(POOLS['claude-gpt'], 10080, 100),
+      bucket(GEMINI_GROUP, 300, short),
+      bucket(GEMINI_GROUP, 10080, week, NOW + 100 * HOUR),
+      bucket(OTHER_GROUP, 300, 100),
+      bucket(OTHER_GROUP, 10080, 100),
     ],
   } };
 }
@@ -68,15 +70,16 @@ test('Windows worker supplies missing APPDATA without overriding an existing pro
   assert.equal(orcaCommandEnv('linux', {}, '/home/test').APPDATA, undefined);
 });
 
-test('pool isolation, exact low threshold, and composite weekly ranking', () => {
+test('only Gemini buckets affect the exact low threshold and composite ranking', () => {
   const raw = roster();
-  const result = rankAccounts(raw, 'gemini', NOW);
+  raw.accounts[2].usage.buckets[2].usedPercent = 100;
+  raw.accounts[2].usage.buckets[3].usedPercent = 100;
+  const result = rankAccounts(raw, NOW);
   assert.equal(result.current.low, true);
   assert.equal(result.best.id, 'c');
   assert.equal(result.alternative.id, 'c');
-  assert.equal(rankAccounts(roster('a', 6), 'gemini', NOW).current.low, false);
-  assert.equal(rankAccounts(roster('a', 99, 5), 'gemini', NOW).current.low, true);
-  assert.equal(rankAccounts(raw, 'claude-gpt', NOW).current.low, false);
+  assert.equal(rankAccounts(roster('a', 6), NOW).current.low, false);
+  assert.equal(rankAccounts(roster('a', 99, 5), NOW).current.low, true);
   assert.ok(scoreQuota(81, 37, NOW + HOUR, NOW) > scoreQuota(81, 37, NOW + 100 * HOUR, NOW));
   assert.ok(scoreQuota(80, 10, null, NOW) < scoreQuota(80, 20, null, NOW) / 2);
   assert.equal(scoreQuota(0, 100, NOW + HOUR, NOW), 0);
@@ -87,12 +90,12 @@ test('stale, reset, missing and invalid windows do not become eligible', () => {
   raw.accounts[0].usage.updatedAt = NOW - 10 * 60_000 - 1;
   raw.accounts[1].usage.updatedAt = NOW - 5 * HOUR - 1;
   raw.accounts[2].usage.buckets[0].resetsAt = NOW;
-  assert.equal(rankAccounts(raw, 'gemini', NOW).best, null);
+  assert.equal(rankAccounts(raw, NOW).best, null);
   raw.accounts[2].usage.buckets[0].resetsAt = NOW + HOUR;
   raw.accounts[2].usage.buckets.splice(1, 1);
-  assert.equal(rankAccounts(raw, 'gemini', NOW).best, null);
-  raw.accounts[2].usage.buckets.push(bucket(POOLS.gemini, 10080, -1));
-  assert.equal(rankAccounts(raw, 'gemini', NOW).best, null);
+  assert.equal(rankAccounts(raw, NOW).best, null);
+  raw.accounts[2].usage.buckets.push(bucket(GEMINI_GROUP, 10080, -1));
+  assert.equal(rankAccounts(raw, NOW).best, null);
 });
 
 test('parsing separates empty data from unsupported or malformed replies', () => {
@@ -118,10 +121,51 @@ test('one 60-second timer, cached reads, masking and deduplication', async (t) =
   assert.equal(reads, 1);
   assert.deepEqual(first, other);
   assert.equal(first.accounts.length, 3);
-  assert.equal(first.accounts[0].label, '账号 1');
-  assert.equal((await h.handlers.get('preferences.set')({ masked: false })).success, true);
-  assert.equal((await h.handlers.get('accounts.read')()).accounts[0].label, 'a@example.test');
+  assert.equal(first.accounts[0].label, 'a@example.test');
+  assert.equal((await h.handlers.get('preferences.set')({ masked: true })).success, true);
+  const masked = await h.handlers.get('accounts.read')();
+  assert.equal(masked.accounts[0].label, '账号 1');
+  assert.doesNotMatch(JSON.stringify(masked), /@example\.test/);
   assert.equal(reads, 1);
+});
+
+test('without saved preferences, Gemini quotas and the next candidate are visible with emails', async (t) => {
+  const h = harness(t, { prefs: null, run: async (args) => {
+    assert.equal(args[1], 'list');
+    return roster('b');
+  } });
+  const state = await h.handlers.get('accounts.refresh')();
+  assert.equal(state.auto, false);
+  assert.equal(state.masked, false);
+  assert.equal(state.accounts.find(({ id }) => id === 'b').label, 'b@example.test');
+  assert.equal(state.accounts.find(({ id }) => id === 'b').fiveHour.remaining, 81);
+  assert.equal(state.accounts.find(({ id }) => id === 'b').weekly.remaining, 37);
+  assert.equal(state.nextId, 'c');
+  assert.equal(state.recommendedId, 'c');
+});
+
+test('next candidate is distinct from an immediate recommendation when the current account leads', async (t) => {
+  const h = harness(t, { prefs: null, run: async () => roster('c') });
+  const state = await h.handlers.get('accounts.refresh')();
+  assert.equal(state.nextId, 'b');
+  assert.equal(state.recommendedId, null);
+  assert.match(state.recommendation, /无需立即切换/);
+});
+
+test('legacy Claude/GPT automation stays off; Gemini recommendation works without a pool setting', async (t) => {
+  const writes = [];
+  const h = harness(t, { prefs: { pool: 'claude-gpt', auto: true, masked: true }, run: async (args) => {
+    if (args[1] === 'list') return roster();
+    writes.push(args[5]);
+    return roster(args[5]);
+  } });
+  const state = await h.handlers.get('accounts.refresh')();
+  assert.equal(state.auto, false);
+  assert.equal(state.masked, true);
+  await h.tick();
+  assert.deepEqual(writes, []);
+  assert.deepEqual(await h.handlers.get('accounts.rotateNow')(), { success: true });
+  assert.deepEqual(writes, ['c']);
 });
 
 test('auto-switch starts only on a poll, at 5%, and confirms with account ID', async (t) => {
