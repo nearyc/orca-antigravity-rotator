@@ -2,11 +2,95 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorker, orcaCommandEnv, parseAccountResult, resolveOrcaBinary } from './src/worker.mjs';
 import { GEMINI_GROUP, rankAccounts, scoreQuota } from './src/quota-policy.mjs';
+import { createCockpitSource, normalizeCockpitQuota, requestCockpit } from './src/cockpit-quota.mjs';
 
 const OTHER_GROUP = 'Claude and GPT models';
 
 const NOW = 1_800_000_000_000;
 const HOUR = 3_600_000;
+const cockpitQuota = (id, { at = NOW, status = 'available', reset = NOW + HOUR, five = 80 } = {}) => ({
+  platform: 'antigravity', accountId: id,
+  quota: { status, updatedAt: Math.floor(at / 1000), data: { models: [
+    { name: 'gemini-5h', percentage: five, reset_time: new Date(reset).toISOString() },
+    { name: 'gemini-weekly', percentage: 68, reset_time: new Date(NOW + 60 * HOUR).toISOString() },
+    { name: 'claude-5h', percentage: 0 },
+  ] } },
+});
+
+test('Cockpit translates only Gemini windows and rejects stale or mismatched readings', () => {
+  const response = cockpitQuota('one');
+  const valid = normalizeCockpitQuota(response, 'one');
+  assert.equal(valid.updatedAt, NOW);
+  assert.equal(valid.status, 'ok');
+  assert.deepEqual(valid.buckets.map(({ windowMinutes, usedPercent }) => [windowMinutes, usedPercent]), [[300, 20], [10080, 32]]);
+  assert.equal(normalizeCockpitQuota(response, 'another'), null);
+  response.quota.data.summaryStale = true;
+  assert.equal(normalizeCockpitQuota(response, 'one').status, 'error');
+  delete response.quota.data.summaryStale;
+  response.quota.updatedAt = NOW;
+  assert.equal(normalizeCockpitQuota(response, 'one').status, 'error');
+});
+
+test('Cockpit client correlates replies, enforces protocol version and rejects writes', async () => {
+  const server = { port: 43123, token: 'fixture-local-token' };
+  const command = { operation: 'list', platform: 'antigravity' };
+  let version = 1;
+  class FakeSocket extends EventTarget {
+    constructor(url) {
+      super();
+      assert.equal(url, 'ws://127.0.0.1:43123');
+      queueMicrotask(() => this.dispatchEvent(new Event('open')));
+    }
+    send(text) {
+      const { type, payload } = JSON.parse(text);
+      assert.equal(type, 'request.automation');
+      assert.equal(payload.authToken, 'fixture-local-token');
+      assert.deepEqual(payload.command, command);
+      for (const requestId of ['unrelated', payload.requestId]) {
+        this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'response.automation',
+          payload: { requestId, version, status: 'ok', data: requestId === 'unrelated' ? 'ignore' : ['matched'] } }) }));
+      }
+    }
+    close() {}
+  }
+  assert.deepEqual(await requestCockpit(server, command, 1000, FakeSocket), ['matched']);
+  version = 2;
+  await assert.rejects(requestCockpit(server, command, 1000, FakeSocket), /不兼容/);
+  await assert.rejects(requestCockpit(server, { ...command, operation: 'switch' }, 1000, FakeSocket), /不支持的/);
+  class SilentSocket extends EventTarget { close() {} }
+  await assert.rejects(requestCockpit(server, command, 5, SilentSocket), /超时/);
+});
+
+test('Cockpit refreshes one due account per check and a failed refresh cannot revive old data', async () => {
+  let at = NOW;
+  const writes = [];
+  const seen = new Map([
+    ['a', cockpitQuota('a', { at: NOW - 5 * 60_000 })],
+    ['b', cockpitQuota('b', { at: NOW - HOUR, reset: NOW })],
+  ]);
+  const read = createCockpitSource({ now: () => at, discover: async () => ({}), request: async (_server, cmd) => {
+    if (cmd.operation === 'list') return ['a', 'b'].map((id) => ({ id, email: `${id}@example.test` }));
+    if (!cmd.refresh) return seen.get(cmd.accountId);
+    writes.push(cmd.accountId);
+    if (cmd.accountId === 'a') throw new Error('fixture failure');
+    const fresh = cockpitQuota(cmd.accountId, { at });
+    seen.set(cmd.accountId, fresh);
+    return fresh;
+  } });
+  const run = () => read({ activeEmail: 'a@example.test', refresh: true });
+  const first = await run();
+  assert.deepEqual(writes, ['a']);
+  assert.equal(first.accounts[0].usage.status, 'error');
+  at += 60_000;
+  const second = await run();
+  assert.deepEqual(writes, ['a']);
+  assert.equal(second.accounts[0].usage.status, 'error');
+  assert.equal(rankAccounts(second, at).alternative, null);
+  at += 60_000;
+  const third = await run();
+  assert.deepEqual(writes, ['a', 'b']);
+  assert.equal(rankAccounts(third, at).alternative.id, 'b');
+});
 const bucket = (group, windowMinutes, remaining, resetsAt = NOW + 6 * HOUR) =>
   ({ group, windowMinutes, usedPercent: 100 - remaining, resetsAt });
 function account(id, short, week, updatedAt = NOW) {
@@ -25,7 +109,7 @@ const roster = (activeAccountId = 'a', short = 5, week = 75) => ({
   activeAccountId, chatUsesAgy: true,
 });
 
-function harness(t, { run, prefs = { pool: 'gemini', auto: true } }) {
+function harness(t, { run, readCockpit, prefs = { pool: 'gemini', auto: true } }) {
   const handlers = new Map();
   const calls = [];
   const posts = [];
@@ -44,7 +128,7 @@ function harness(t, { run, prefs = { pool: 'gemini', auto: true } }) {
     host: { call: async (method, params) => { calls.push({ method, params }); } },
     log: (message) => log.push(message),
   }, {
-    run, now: () => NOW,
+    run, readCockpit, now: () => NOW,
     schedule: (fn, ms) => { tick = fn; interval = ms; return 42; },
     cancel: (id) => { assert.equal(id, 42); cleared = true; },
   });
@@ -235,11 +319,99 @@ test('unknown route, missing backup and failed refresh cannot rotate', async (t)
   await h.handlers.get('accounts.refresh')();
   assert.match((await h.tick()).policy, /未确认本机聊天/);
   raw = { ...roster(), accounts: [account('a', 5, 60), account('b', 5, 100)] };
-  assert.match((await h.tick()).policy, /暂无额度充足/);
+  assert.match((await h.tick()).policy, /暂无可切换且额度充足/);
   raw = null;
   const state = await h.tick();
   assert.equal(state.accounts.length, 2);
   assert.equal(state.recommendedId, null);
   assert.match(state.error, /无法读取/);
   assert.doesNotMatch(JSON.stringify(h.log), /private stdout/);
+});
+
+const cockpitPrefs = { source: 'cockpit', auto: true };
+const cockpitRoster = () => ({ accounts: [
+  { ...account('cpt-a', 5, 75), email: 'a@example.test' },
+  { ...account('cpt-b', 61, 65), email: 'b@example.test' },
+  account('cockpit-only', 100, 100),
+] });
+const orcaIdentity = (id) => ({ ...roster(id, 90), currentAccount: { email: `${id}@example.test`, identityKnown: true } });
+
+test('Cockpit roster independently supplies scoring and rotation reuses a verified Orca ID', async (t) => {
+  const writes = [];
+  let active = 'a';
+  let reserveExpired = true;
+  const h = harness(t, { prefs: cockpitPrefs, readCockpit: async ({ activeEmail, refresh }) => {
+    assert.equal(activeEmail, `${active}@example.test`);
+    const result = cockpitRoster();
+    if (reserveExpired) result.accounts[1].usage.buckets[0].resetsAt = NOW;
+    if (!refresh) assert.fail('background reads should request bounded refresh');
+    return result;
+  }, run: async (args) => {
+    if (args[1] === 'list') return orcaIdentity(active);
+    writes.push(args[5]);
+    active = args[5];
+    return orcaIdentity(active);
+  } });
+  const first = await h.handlers.get('accounts.refresh')();
+  assert.equal(first.source, 'cockpit');
+  assert.equal(first.nextId, null);
+  assert.equal(first.accounts.find(({ id }) => id === 'cockpit-only').switchable, false);
+  assert.equal(first.accounts.find(({ id }) => id === 'cpt-a').fiveHour.remaining, 5);
+  assert.deepEqual(writes, []);
+  reserveExpired = false;
+  const result = await h.tick();
+  assert.deepEqual(writes, ['b']);
+  assert.equal(result.accounts.find(({ active }) => active).id, 'cpt-b');
+});
+
+test('automatic rotation aborts if the actual login changes during Cockpit refresh', async (t) => {
+  let active = 'a';
+  let changeDuringRefresh = false;
+  const commands = [];
+  const h = harness(t, { prefs: cockpitPrefs, readCockpit: async () => {
+    if (changeDuringRefresh) active = 'b';
+    return cockpitRoster();
+  }, run: async (args) => {
+    commands.push(args[1]);
+    return orcaIdentity(active);
+  } });
+  await h.handlers.get('accounts.refresh')();
+  changeDuringRefresh = true;
+  const state = await h.tick();
+  assert.deepEqual(commands, ['list', 'list', 'list']);
+  assert.equal(state.accounts.find(({ active }) => active).id, 'cpt-b');
+  assert.ok(!h.calls.some(({ method }) => method === 'notifications.show'));
+});
+
+test('Cockpit data remains visible without Orca; ambiguous or missing identities cannot switch', async (t) => {
+  let identity = null;
+  const h = harness(t, { prefs: { ...cockpitPrefs, masked: true }, readCockpit: async () => cockpitRoster(), run: async (args) => {
+    assert.equal(args[1], 'list');
+    if (!identity) throw new Error('private diagnostic');
+    return identity;
+  } });
+  const first = await h.handlers.get('accounts.refresh')();
+  assert.equal(first.accounts.length, 3);
+  assert.equal(first.identityUnavailable, true);
+  assert.equal(first.nextId, null);
+  assert.doesNotMatch(JSON.stringify(first), /@example\.test/);
+  identity = orcaIdentity('a');
+  identity.accounts.push({ ...account('duplicate', 100, 100), email: 'B@EXAMPLE.TEST' });
+  const next = await h.tick();
+  assert.equal(next.identityUnavailable, false);
+  assert.equal(next.nextId, null);
+  assert.equal(next.accounts.find(({ id }) => id === 'cpt-b').switchable, false);
+  assert.equal((await h.handlers.get('accounts.selectTarget')({ id: 'cpt-b' })).success, false);
+});
+
+test('changing source disarms automation and a Cockpit outage does not fall back to Orca', async (t) => {
+  const h = harness(t, { run: async () => orcaIdentity('a'), readCockpit: async () => { throw new Error('private diagnostic'); } });
+  await h.handlers.get('accounts.refresh')();
+  assert.equal((await h.handlers.get('preferences.set')({ source: 'cockpit' })).success, true);
+  const next = await h.handlers.get('accounts.read')();
+  assert.equal(next.source, 'cockpit');
+  assert.equal(next.auto, false);
+  assert.equal(next.accounts.length, 0);
+  assert.equal(next.error, '无法读取 Cockpit 账号。');
+  assert.doesNotMatch(JSON.stringify(h.log), /private diagnostic/);
 });

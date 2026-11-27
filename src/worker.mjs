@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, win32 } from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { LOW_QUOTA, rankAccounts } from './quota-policy.mjs';
+import { CockpitError, createCockpitSource, normalizedEmail } from './cockpit-quota.mjs';
 
 const exec = promisify(execFile);
 const LIST = ['account', 'list', '--agent', 'antigravity', '--json'];
@@ -60,6 +61,8 @@ export function parseAccountResult(result) {
   return {
     accounts: accounts.map(({ id, email, usage }) => ({ id, email: cleanText(email) || null, usage })),
     activeAccountId: active,
+    currentEmail: result.currentAccount?.identityKnown === true
+      ? normalizedEmail(result.currentAccount.email) || null : null,
     chatUsesAgy: result.chatUsesAgy === true && result.chatKeyOnAgy !== true,
   };
 }
@@ -147,8 +150,33 @@ function createTelemetry(now) {
 const refusal = (reason) => ({ success: false, reason });
 const explain = (err, fallback) => err instanceof OrcaFailure ? err.message : fallback;
 
-export function createWorker(orca, { run = runOrca, now = Date.now, schedule = setInterval, cancel = clearInterval } = {}) {
-  let prefs = { auto: false, masked: false };
+function withOrcaIdentity(cockpit, orca) {
+  const unique = new Map();
+  for (const { id, email } of orca?.accounts ?? []) {
+    const key = normalizedEmail(email);
+    if (key) unique.set(key, unique.has(key) ? null : id);
+  }
+  const counts = new Map();
+  for (const { email } of cockpit.accounts) if (email) counts.set(email, (counts.get(email) ?? 0) + 1);
+  const accounts = cockpit.accounts.map((account) => {
+    const unambiguous = counts.get(account.email) === 1;
+    const orcaId = unambiguous ? unique.get(account.email) ?? null : null;
+    // Only use the actual login, never Cockpit's selected row or a saved-but-inactive Orca account.
+    const active = unambiguous && account.email === orca?.currentEmail;
+    return { ...account, active, orcaId, switchable: Boolean(orcaId) };
+  });
+  const activeAccountId = accounts.find(({ active }) => active)?.id ?? null;
+  return {
+    accounts,
+    activeAccountId,
+    chatUsesAgy: orca?.chatUsesAgy === true,
+    identityUnavailable: !activeAccountId,
+  };
+}
+
+export function createWorker(orca, { run = runOrca, now = Date.now, schedule = setInterval, cancel = clearInterval,
+  readCockpit = createCockpitSource({ now }) } = {}) {
+  let prefs = { auto: false, masked: false, source: 'orca' };
   let raw = null;
   let syncedAt = null;
   let error = null;
@@ -168,6 +196,7 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     prefs = {
       auto: saved?.auto === true && (saved.pool === undefined || saved.pool === 'gemini'),
       masked: saved?.masked === true,
+      source: saved?.source === 'cockpit' ? 'cockpit' : 'orca',
     };
   }).catch(() => orca.log('无法读取面板偏好，已使用安全默认值。'));
 
@@ -192,21 +221,23 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     else if (!current?.valid) policy = '等待当前账号的有效额度';
     else if (limit) policy = limit;
     else if (!current.low) policy = `监控中：任一窗口剩余不超过 ${LOW_QUOTA}% 时才考虑切换`;
-    else if (!alternative) policy = '当前额度低，暂无额度充足的备用账号';
+    else if (!alternative) policy = '当前额度低，暂无可切换且额度充足的备用账号';
     else policy = '当前额度低，等待下一次自动检查';
-    const recommendedId = !error && !limit && best && !best.active ? best.id : null;
+    const recommendedId = !error && !limit && !raw?.identityUnavailable && best && !best.active ? best.id : null;
     const recommendation = error ? '账号读取失败，无法推荐。'
       : !raw ? '正在读取账号。'
-      : !accounts.length ? '尚未保存账号。'
-      : limit ?? (!best ? '暂无额度数据有效且充足的账号。'
+      : !accounts.length ? '所选来源尚未保存账号。'
+      : raw.identityUnavailable ? '无法确认本机 agy 登录身份，暂停切换。'
+      : limit ?? (!best ? '暂无可切换且额度充足的账号。'
         : best.active ? '当前账号评分最高，无需立即切换。' : null);
     return {
       revision, syncedAt, error, switching, auto: prefs.auto, masked: prefs.masked,
+      source: prefs.source, identityUnavailable: raw?.identityUnavailable === true,
       intervalSeconds: POLL_SECONDS, lowQuota: LOW_QUOTA, policy, model: null, recommendedId, recommendation,
-      nextId: !error && current ? alternative?.id ?? null : null,
-      accounts: accounts.map(({ id, email, index, active, updatedAt, fiveHour, weekly, valid, low, score }) => ({
+      nextId: !error && !raw?.identityUnavailable && current ? alternative?.id ?? null : null,
+      accounts: accounts.map(({ id, email, index, active, updatedAt, fiveHour, weekly, valid, low, score, switchable }) => ({
         id, label: prefs.masked ? `账号 ${index + 1}` : email || `账号 ${index + 1}（邮箱未提供）`,
-        active, updatedAt, fiveHour, weekly, valid, low, score,
+        active, updatedAt, fiveHour, weekly, valid, low, score, switchable,
       })),
     };
   }
@@ -233,19 +264,33 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
   }
 
   function accept(result) {
-    raw = parseAccountResult(result);
+    raw = result;
     syncedAt = now();
     error = null;
   }
 
-  async function readAccounts() {
+  async function readOrcaIdentity() {
+    try { return parseAccountResult(await run(LIST)); }
+    catch { return null; }
+  }
+
+  async function readAccounts(refreshQuota = false) {
     try {
-      const result = await run(LIST);
+      let result;
+      if (prefs.source === 'cockpit') {
+        const orcaIdentity = await readOrcaIdentity();
+        if (disposed) return false;
+        const cockpit = await readCockpit({ activeEmail: orcaIdentity?.currentEmail, refresh: refreshQuota });
+        result = withOrcaIdentity(cockpit, orcaIdentity);
+      } else {
+        result = parseAccountResult(await run(LIST));
+      }
       if (!disposed) accept(result);
       return !disposed;
     } catch (err) {
       if (disposed) return false;
-      const message = explain(err, '无法读取 Orca 账号。');
+      const message = err instanceof CockpitError ? err.message
+        : prefs.source === 'cockpit' ? '无法读取 Cockpit 账号。' : explain(err, '无法读取 Orca 账号。');
       if (error !== message) orca.log(message);
       error = message;
       return false;
@@ -262,14 +307,40 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
   }
 
   async function select(targetId, automatically) {
+    const cockpitMode = prefs.source === 'cockpit';
+    const target = raw.accounts.find(({ id }) => id === targetId);
+    if (!target) return refusal('找不到所选账号。');
+    if (cockpitMode && (raw.identityUnavailable || !target.orcaId)) {
+      return refusal('无法确认本机登录或目标账号的 Orca 切换路径。');
+    }
+    const orcaId = cockpitMode ? target.orcaId : targetId;
     switching = true;
     publish();
     try {
-      const selection = await run(['account', 'select', '--agent', 'antigravity', '--account', targetId, '--json']);
+      if (cockpitMode) {
+        // A Cockpit refresh can take seconds; check for external account changes before writing.
+        const identity = await readOrcaIdentity();
+        if (disposed) return refusal('插件已停止。');
+        const checked = withOrcaIdentity(raw, identity);
+        if (checked.activeAccountId !== raw.activeAccountId || checked.identityUnavailable ||
+          checked.accounts.find(({ id }) => id === targetId)?.orcaId !== orcaId ||
+          (automatically && !checked.chatUsesAgy)) {
+          raw = checked;
+          return refusal('本机账号或聊天路由已变化，请刷新后重试。');
+        }
+        if (automatically) {
+          const { current, alternative } = rankAccounts(checked, now());
+          if (!current?.low || alternative?.id !== targetId) return refusal('额度状态已变化，已取消自动切换。');
+        }
+      }
+      const selection = await run(['account', 'select', '--agent', 'antigravity', '--account', orcaId, '--json']);
       if (disposed) return refusal('插件已停止。');
       const verified = parseAccountResult(selection);
-      if (verified.activeAccountId !== targetId) throw new OrcaFailure('Orca 未确认目标账号已激活。');
-      accept(verified);
+      const result = cockpitMode ? withOrcaIdentity(raw, verified) : verified;
+      if (verified.activeAccountId !== orcaId || result.activeAccountId !== targetId) {
+        throw new OrcaFailure('Orca 未确认目标账号已激活。');
+      }
+      accept(result);
       const at = now();
       history = history.filter((time) => at - time < Math.max(CIRCUIT_WINDOW, COOLDOWN));
       history.push(at);
@@ -283,7 +354,9 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
       return { success: true };
     } catch (err) {
       paused = true;
-      const readable = !disposed && await readAccounts();
+      const checked = cockpitMode && !disposed ? await readOrcaIdentity() : null;
+      if (cockpitMode && !disposed) raw = withOrcaIdentity(raw, checked);
+      const readable = !disposed && (cockpitMode ? !raw.identityUnavailable : await readAccounts());
       const status = readable && raw.activeAccountId === targetId
         ? '重新读取时目标已是当前账号，但切换命令的结果无法确认。'
         : readable ? '重新读取时目标不是当前账号。' : '无法确认当前账号。';
@@ -297,10 +370,11 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
 
   function refresh(checkAuto) {
     if (operation) return operation.then(snapshot);
+    if (saving || disposed) return Promise.resolve(snapshot());
     return exclusive(async () => {
       await ready;
-      if (disposed || !(await readAccounts()) || !checkAuto || !prefs.auto ||
-        paused || saving || !raw.chatUsesAgy || limitation(now())) return;
+      if (disposed || !(await readAccounts(true)) || !checkAuto || !prefs.auto ||
+        paused || saving || !raw.chatUsesAgy || raw.identityUnavailable || limitation(now())) return;
       const { current, alternative } = rankAccounts(raw, now());
       if (current?.low && alternative) await select(alternative.id, true);
     }).then(snapshot);
@@ -314,8 +388,9 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
       if (saving) return refusal('正在更新偏好，请稍后再试。');
       const limit = limitation(now());
       if (limit) return refusal(limit);
+      if (raw.identityUnavailable) return refusal('无法确认本机 agy 登录身份，暂停切换。');
       if (mode === 'recommended') {
-        if (!raw.accounts.length) return refusal('尚未在 Orca 中保存账号。');
+        if (!raw.accounts.length) return refusal(prefs.source === 'cockpit' ? '尚未在 Cockpit 中保存账号。' : '尚未在 Orca 中保存账号。');
         const { best } = rankAccounts(raw, now());
         if (!best) return refusal('没有额度数据有效且充足的账号。');
         if (best.active) return refusal('当前账号已经是最合适的账号。');
@@ -333,16 +408,28 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     const next = { ...prefs };
     if (typeof input?.masked === 'boolean') next.masked = input.masked;
     if (typeof input?.auto === 'boolean') next.auto = input.auto;
+    const changeSource = (input?.source === 'orca' || input?.source === 'cockpit') && input.source !== prefs.source;
+    if (changeSource) {
+      if (operation) return refusal('正在同步账号，请稍后更换来源。');
+      next.source = input.source;
+      next.auto = false;
+    }
     saving = true;
     try {
       await orca.storage.set(PREF_KEY, next);
       if (!next.auto || !prefs.auto) paused = false;
       prefs = next;
+      if (changeSource) {
+        raw = null;
+        syncedAt = null;
+        error = null;
+      }
       publish();
-      return { success: true };
     } catch {
       return refusal('无法保存面板偏好。');
     } finally { saving = false; }
+    if (changeSource && !disposed) await refresh(false);
+    return { success: true };
   }
 
   const subscriptions = [

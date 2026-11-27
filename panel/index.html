@@ -105,6 +105,7 @@
       </div>
     </div>
     <p id="sync" class="quiet" role="status">正在连接 Orca…</p>
+    <p id="source-detail" class="quiet"></p>
     <p id="recommendation" class="quiet" hidden></p>
   </header>
 
@@ -117,6 +118,7 @@
     <p class="quiet">当前模型：<span id="model">暂无法读取</span></p>
     <p id="next" class="quiet" role="status">下一候选：等待读取账号</p>
     <div class="controls">
+      <label class="control"><input id="cockpit" type="checkbox" disabled> 从 Cockpit 读取额度</label>
       <label class="control"><input id="auto" type="checkbox" disabled> 自动轮换</label>
       <label class="control"><input id="mask" type="checkbox" disabled> 隐藏邮箱</label>
     </div>
@@ -208,12 +210,17 @@
     const live = hasData && !state?.error;
     $('refresh').disabled = blocked || !host;
     $('recommend').disabled = blocked || !live || !state?.recommendedId;
-    $('auto').disabled = $('mask').disabled = blocked || !state;
+    $('auto').disabled = $('mask').disabled = $('cockpit').disabled = blocked || !state;
     if (!state) return;
+    const cockpit = state.source === 'cockpit';
     if (!busy) {
       $('auto').checked = state.auto;
       $('mask').checked = state.masked;
+      $('cockpit').checked = cockpit;
     }
+    $('source-detail').textContent = cockpit
+      ? '来源：Cockpit 桌面版 · 每次检查最多刷新一个需更新的账号。仅与 Orca 唯一匹配的账号可切换。'
+      : '来源：Orca · 只读取已保存的额度快照，不刷新备用账号。';
     $('sync').textContent = state.switching ? '正在切换账号…' : hasData
       ? `${state.error ? '上次成功同步' : '同步于'} ${stamp.format(state.syncedAt)} · 每 ${state.intervalSeconds} 秒检查`
       : state.error ? '尚未成功同步' : '正在读取账号…';
@@ -231,7 +238,8 @@
     $('recommendation').hidden = !state.recommendation;
     $('count').textContent = hasData ? `${state.accounts.length} 个` : '';
     $('empty').hidden = state.accounts.length > 0;
-    $('empty').textContent = state.error ? '暂无可显示的账号数据。' : live ? '尚未在 Orca 中保存账号。' : '正在读取账号…';
+    $('empty').textContent = state.error ? '暂无可显示的账号数据。' : live
+      ? (cockpit ? '尚未在 Cockpit 中保存账号。' : '尚未在 Orca 中保存账号。') : '正在读取账号…';
     renderAccounts(blocked, live);
   }
 
@@ -259,13 +267,16 @@
       if (!item.fiveHour || !item.weekly) identity.append(node('span', '额度未知', 'badge'));
       else if (!item.valid || !live) identity.append(node('span', '额度快照不可用于切换', 'badge'));
       identity.append(node('span', live && item.score != null ? `综合分 ${scoreText(item.score)}` : '暂无综合分', 'badge number'));
+      if (!item.active && !item.switchable && state.source === 'cockpit') {
+        identity.append(node('span', '仅查额度', 'badge'));
+      }
       heading.append(identity);
-      if (!item.active) {
+      if (!item.active && (state.source !== 'cockpit' || item.switchable)) {
         const button = node('button', '切换');
         button.type = 'button';
         button.dataset.account = item.id;
         button.setAttribute('aria-label', `切换至 ${item.label}`);
-        button.disabled = blocked || !live;
+        button.disabled = blocked || !live || state.identityUnavailable;
         button.addEventListener('click', () => action('accounts.selectTarget', { id: item.id }, '已切换账号。'));
         heading.append(button);
         if (focusedId === item.id && !button.disabled) focusTarget = button;
@@ -334,6 +345,7 @@
 
   $('refresh').addEventListener('click', () => action('accounts.refresh'));
   $('recommend').addEventListener('click', () => action('accounts.rotateNow', undefined, '已切换到推荐账号。'));
+  $('cockpit').addEventListener('change', (event) => action('preferences.set', { source: event.target.checked ? 'cockpit' : 'orca' }));
   $('auto').addEventListener('change', (event) => action('preferences.set', { auto: event.target.checked }));
   $('mask').addEventListener('change', (event) => action('preferences.set', { masked: event.target.checked }));
   $('usage').addEventListener('toggle', () => { if ($('usage').open && host) void loadStats(); });

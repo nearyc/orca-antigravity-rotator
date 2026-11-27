@@ -22,7 +22,7 @@ export function scoreQuota(fiveHour, weekly, resetsAt, now) {
 }
 
 export function rankAccounts(result, now) {
-  const accounts = result.accounts.map(({ id, email, usage }, index) => {
+  const accounts = result.accounts.map(({ id, email, usage, switchable = true }, index) => {
     const active = id === result.activeAccountId;
     const updatedAt = Number.isFinite(usage?.updatedAt) && usage.updatedAt > 0 ? usage.updatedAt : null;
     const maxAge = active ? ACTIVE_MAX_AGE : RESERVE_MAX_AGE;
@@ -33,9 +33,9 @@ export function rankAccounts(result, now) {
     const valid = !!(fiveHour?.valid && weekly?.valid);
     const low = valid && Math.min(fiveHour.remaining, weekly.remaining) <= LOW_QUOTA;
     const score = valid ? scoreQuota(fiveHour.remaining, weekly.remaining, weekly.resetsAt, now) : null;
-    return { id, email, index, active, updatedAt, fiveHour, weekly, valid, low, score };
+    return { id, email, index, active, updatedAt, fiveHour, weekly, valid, low, score, switchable };
   });
-  const ranked = accounts.filter((account) => account.valid && !account.low).sort((a, b) =>
+  const ranked = accounts.filter((account) => account.valid && !account.low && (account.active || account.switchable)).sort((a, b) =>
     b.score - a.score || b.fiveHour.remaining - a.fiveHour.remaining ||
     (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return {
