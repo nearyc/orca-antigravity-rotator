@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, win32 } from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
-import { LOW_QUOTA, rankAccounts } from './quota-policy.mjs';
+import { LOW_QUOTA, UPGRADE_INTERVAL_MINUTES, chooseAutomaticTarget, rankAccounts } from './quota-policy.mjs';
 import { CockpitError, createCockpitSource, normalizedEmail } from './cockpit-quota.mjs';
 
 const exec = promisify(execFile);
@@ -20,7 +20,7 @@ function loadConfig() {
 
 const config = loadConfig();
 const positive = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback;
-const POLL_SECONDS = Math.max(60, Math.min(3600, positive(config.native_refresh_seconds, 60)));
+const POLL_SECONDS = Math.max(60, Math.min(3600, positive(config.native_refresh_seconds, 120)));
 const COOLDOWN = positive(config.cooldown_seconds, 30) * 1000;
 const CIRCUIT_WINDOW = positive(config.circuit_breaker_window_seconds, 180) * 1000;
 const CIRCUIT_MAX = Math.ceil(positive(config.circuit_breaker_max_switches, 5));
@@ -178,6 +178,7 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
   readCockpit = createCockpitSource({ now }) } = {}) {
   let prefs = { auto: false, masked: false, source: 'orca' };
   let raw = null;
+  let activeSince = null;
   let syncedAt = null;
   let error = null;
   let switching = false;
@@ -217,12 +218,12 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     if (!prefs.auto) policy = '自动轮换未开启';
     else if (paused) policy = '上次切换未确认；关闭后重新开启可恢复自动轮换';
     else if (error || !raw) policy = '等待成功读取账号';
-    else if (!raw.chatUsesAgy) policy = '未确认本机聊天使用这组账号，自动轮换暂停';
+    else if (raw.identityUnavailable || !raw.chatUsesAgy) policy = '未确认本机聊天使用这组账号，自动轮换暂停';
     else if (!current?.valid) policy = '等待当前账号的有效额度';
     else if (limit) policy = limit;
-    else if (!current.low) policy = `监控中：任一窗口剩余不超过 ${LOW_QUOTA}% 时才考虑切换`;
-    else if (!alternative) policy = '当前额度低，暂无可切换且额度充足的备用账号';
-    else policy = '当前额度低，等待下一次自动检查';
+    else if (current.low && !alternative) policy = '当前额度低，暂无可切换且额度充足的备用账号';
+    else if (chooseAutomaticTarget({ current, alternative }, activeSince, at)) policy = '已找到符合轮换条件的账号，等待下一次自动检查';
+    else policy = `监控中：低于 ${LOW_QUOTA}% 可提前切换，满 ${UPGRADE_INTERVAL_MINUTES} 分钟后有更高分才切换`;
     const recommendedId = !error && !limit && !raw?.identityUnavailable && best && !best.active ? best.id : null;
     const recommendation = error ? '账号读取失败，无法推荐。'
       : !raw ? '正在读取账号。'
@@ -233,7 +234,8 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     return {
       revision, syncedAt, error, switching, auto: prefs.auto, masked: prefs.masked,
       source: prefs.source, identityUnavailable: raw?.identityUnavailable === true,
-      intervalSeconds: POLL_SECONDS, lowQuota: LOW_QUOTA, policy, model: null, recommendedId, recommendation,
+      intervalSeconds: POLL_SECONDS, lowQuota: LOW_QUOTA, upgradeMinutes: UPGRADE_INTERVAL_MINUTES,
+      policy, model: null, recommendedId, recommendation,
       nextId: !error && !raw?.identityUnavailable && current ? alternative?.id ?? null : null,
       accounts: accounts.map(({ id, email, index, active, updatedAt, fiveHour, weekly, valid, low, score, switchable }) => ({
         id, label: prefs.masked ? `账号 ${index + 1}` : email || `账号 ${index + 1}（邮箱未提供）`,
@@ -263,9 +265,14 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     }).catch(() => orca.log('无法更新 Antigravity 状态栏。'));
   }
 
-  function accept(result) {
+  function observe(result, at) {
+    if (result.activeAccountId !== raw?.activeAccountId) activeSince = result.activeAccountId ? at : null;
     raw = result;
+  }
+
+  function accept(result) {
     syncedAt = now();
+    observe(result, syncedAt);
     error = null;
   }
 
@@ -325,12 +332,14 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
         if (checked.activeAccountId !== raw.activeAccountId || checked.identityUnavailable ||
           checked.accounts.find(({ id }) => id === targetId)?.orcaId !== orcaId ||
           (automatically && !checked.chatUsesAgy)) {
-          raw = checked;
+          observe(checked, now());
           return refusal('本机账号或聊天路由已变化，请刷新后重试。');
         }
         if (automatically) {
-          const { current, alternative } = rankAccounts(checked, now());
-          if (!current?.low || alternative?.id !== targetId) return refusal('额度状态已变化，已取消自动切换。');
+          const at = now();
+          if (chooseAutomaticTarget(rankAccounts(checked, at), activeSince, at)?.id !== targetId) {
+            return refusal('额度状态已变化，已取消自动切换。');
+          }
         }
       }
       const selection = await run(['account', 'select', '--agent', 'antigravity', '--account', orcaId, '--json']);
@@ -355,7 +364,7 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     } catch (err) {
       paused = true;
       const checked = cockpitMode && !disposed ? await readOrcaIdentity() : null;
-      if (cockpitMode && !disposed) raw = withOrcaIdentity(raw, checked);
+      if (cockpitMode && !disposed) observe(withOrcaIdentity(raw, checked), now());
       const readable = !disposed && (cockpitMode ? !raw.identityUnavailable : await readAccounts());
       const status = readable && raw.activeAccountId === targetId
         ? '重新读取时目标已是当前账号，但切换命令的结果无法确认。'
@@ -375,8 +384,9 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
       await ready;
       if (disposed || !(await readAccounts(true)) || !checkAuto || !prefs.auto ||
         paused || saving || !raw.chatUsesAgy || raw.identityUnavailable || limitation(now())) return;
-      const { current, alternative } = rankAccounts(raw, now());
-      if (current?.low && alternative) await select(alternative.id, true);
+      const at = now();
+      const target = chooseAutomaticTarget(rankAccounts(raw, at), activeSince, at);
+      if (target) await select(target.id, true);
     }).then(snapshot);
   }
 
@@ -418,9 +428,11 @@ export function createWorker(orca, { run = runOrca, now = Date.now, schedule = s
     try {
       await orca.storage.set(PREF_KEY, next);
       if (!next.auto || !prefs.auto) paused = false;
+      if (next.auto && !prefs.auto) activeSince = raw?.activeAccountId ? now() : null;
       prefs = next;
       if (changeSource) {
         raw = null;
+        activeSince = null;
         syncedAt = null;
         error = null;
       }

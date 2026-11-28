@@ -109,7 +109,7 @@ const roster = (activeAccountId = 'a', short = 5, week = 75) => ({
   activeAccountId, chatUsesAgy: true,
 });
 
-function harness(t, { run, readCockpit, prefs = { pool: 'gemini', auto: true } }) {
+function harness(t, { run, readCockpit, now = () => NOW, prefs = { pool: 'gemini', auto: true } }) {
   const handlers = new Map();
   const calls = [];
   const posts = [];
@@ -128,7 +128,7 @@ function harness(t, { run, readCockpit, prefs = { pool: 'gemini', auto: true } }
     host: { call: async (method, params) => { calls.push({ method, params }); } },
     log: (message) => log.push(message),
   }, {
-    run, readCockpit, now: () => NOW,
+    run, readCockpit, now,
     schedule: (fn, ms) => { tick = fn; interval = ms; return 42; },
     cancel: (id) => { assert.equal(id, 42); cleared = true; },
   });
@@ -162,8 +162,9 @@ test('only Gemini buckets affect the exact low threshold and composite ranking',
   assert.equal(result.current.low, true);
   assert.equal(result.best.id, 'c');
   assert.equal(result.alternative.id, 'c');
-  assert.equal(rankAccounts(roster('a', 6), NOW).current.low, false);
-  assert.equal(rankAccounts(roster('a', 99, 5), NOW).current.low, true);
+  assert.equal(rankAccounts(roster('a', 10), NOW).current.low, false);
+  assert.equal(rankAccounts(roster('a', 9), NOW).current.low, true);
+  assert.equal(rankAccounts(roster('a', 99, 9), NOW).current.low, true);
   assert.ok(scoreQuota(81, 37, NOW + HOUR, NOW) > scoreQuota(81, 37, NOW + 100 * HOUR, NOW));
   assert.ok(scoreQuota(80, 10, null, NOW) < scoreQuota(80, 20, null, NOW) / 2);
   assert.equal(scoreQuota(0, 100, NOW + HOUR, NOW), 0);
@@ -188,14 +189,14 @@ test('parsing separates empty data from unsupported or malformed replies', () =>
   assert.throws(() => parseAccountResult(roster('wrong')));
 });
 
-test('one 60-second timer, cached reads, masking and deduplication', async (t) => {
+test('one 120-second timer, cached reads, masking and deduplication', async (t) => {
   let complete;
   let reads = 0;
   const h = harness(t, { run: () => {
     reads++;
     return new Promise((resolve) => { complete = resolve; });
   } });
-  assert.equal(h.interval, 60_000);
+  assert.equal(h.interval, 120_000);
   assert.equal((await h.handlers.get('accounts.read')()).syncedAt, null);
   const pending = h.handlers.get('accounts.refresh')();
   const second = h.handlers.get('accounts.refresh')();
@@ -252,9 +253,9 @@ test('legacy Claude/GPT automation stays off; Gemini recommendation works withou
   assert.deepEqual(writes, ['c']);
 });
 
-test('auto-switch starts only on a poll, at 5%, and confirms with account ID', async (t) => {
+test('low-quota rotation runs on a poll below 10%, not at 10%, and confirms the account ID', async (t) => {
   const writes = [];
-  let raw = roster('a', 6);
+  let raw = roster('a', 10);
   const h = harness(t, { run: async (args) => {
     if (args[1] === 'list') return raw;
     writes.push(args[5]);
@@ -264,7 +265,7 @@ test('auto-switch starts only on a poll, at 5%, and confirms with account ID', a
   await h.handlers.get('accounts.refresh')();
   await h.tick();
   assert.deepEqual(writes, []);
-  raw = roster();
+  raw = roster('a', 9);
   await h.handlers.get('accounts.refresh')();
   assert.deepEqual(writes, []);
   const updated = await h.tick();
@@ -273,6 +274,56 @@ test('auto-switch starts only on a poll, at 5%, and confirms with account ID', a
   assert.ok(h.calls.some(({ method }) => method === 'notifications.show'));
   assert.ok(h.calls.every(({ method }) => method !== 'terminal.sendText'));
 });
+
+for (const source of ['orca', 'cockpit']) {
+  test(`${source}: periodic rotation waits 30 minutes, skips ties, and restarts after a confirmed switch`, async (t) => {
+    const period = 30 * 60_000;
+    let at = NOW;
+    let active = 'a';
+    let remaining = { a: 40, b: 40 };
+    const writes = [];
+    const accounts = () => Object.entries(remaining).map(([id, five]) => account(id, five, 70, at));
+    const h = harness(t, {
+      prefs: { source, auto: true }, now: () => at,
+      readCockpit: async () => ({ accounts: accounts().map((row) => ({ ...row, id: `cpt-${row.id}` })) }),
+      run: async (args) => {
+        if (args[1] === 'select') {
+          active = args[5];
+          writes.push(active);
+        }
+        return {
+          accounts: accounts(), activeAccountId: active, chatUsesAgy: true,
+          currentAccount: { identityKnown: true, email: `${active}@example.test` },
+        };
+      },
+    });
+    const initial = await h.handlers.get('accounts.refresh')();
+    assert.equal(initial.lowQuota, 10);
+    assert.equal(initial.upgradeMinutes, 30);
+
+    remaining.b = 80;
+    at = NOW + period - 1;
+    await h.tick();
+    assert.deepEqual(writes, []);
+
+    remaining.b = 40;
+    at = NOW + period;
+    await h.tick();
+    assert.deepEqual(writes, []);
+
+    remaining.b = 80;
+    await h.tick();
+    assert.deepEqual(writes, ['b']);
+
+    remaining.a = 90;
+    at = NOW + 2 * period - 1;
+    await h.tick();
+    assert.deepEqual(writes, ['b']);
+    at = NOW + 2 * period;
+    await h.tick();
+    assert.deepEqual(writes, ['b', 'a']);
+  });
+}
 
 test('failed confirmation rereads once, publishes actual account, pauses auto, and does not notify success', async (t) => {
   let reads = 0;

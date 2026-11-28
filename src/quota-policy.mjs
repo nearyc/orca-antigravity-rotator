@@ -1,4 +1,13 @@
-export const LOW_QUOTA = 5;
+export const LOW_QUOTA = 10;
+export const UPGRADE_INTERVAL_MINUTES = 30;
+const UPGRADE_INTERVAL_MS = UPGRADE_INTERVAL_MINUTES * 60_000;
+
+export function chooseAutomaticTarget({ current, alternative }, activeSince, now) {
+  if (!current?.valid || !alternative) return null;
+  if (current.low) return alternative;
+  return activeSince !== null && now - activeSince >= UPGRADE_INTERVAL_MS && alternative.score > current.score
+    ? alternative : null;
+}
 export const ACTIVE_MAX_AGE = 10 * 60_000;
 export const RESERVE_MAX_AGE = 5 * 60 * 60_000;
 const THREE_DAYS = 3 * 24 * 60 * 60_000;
@@ -31,7 +40,7 @@ export function rankAccounts(result, now) {
     const fiveHour = readWindow(buckets, 300, now, fresh);
     const weekly = readWindow(buckets, 10080, now, fresh);
     const valid = !!(fiveHour?.valid && weekly?.valid);
-    const low = valid && Math.min(fiveHour.remaining, weekly.remaining) <= LOW_QUOTA;
+    const low = valid && Math.min(fiveHour.remaining, weekly.remaining) < LOW_QUOTA;
     const score = valid ? scoreQuota(fiveHour.remaining, weekly.remaining, weekly.resetsAt, now) : null;
     return { id, email, index, active, updatedAt, fiveHour, weekly, valid, low, score, switchable };
   });

@@ -138,8 +138,9 @@
     <summary>账号切换规则</summary>
     <ul class="quiet rules">
       <li>只看 Gemini 的 5 小时和每周额度。综合分以 5 小时剩余为基础，周额度越低扣分越多，临近周重置会减轻扣分；每周剩余低于 20% 额外扣分。</li>
-      <li>「下一候选」是额度有效、两个窗口都高于 <span id="reserve-floor">5</span>% 的最高分备用账号，是预览，不代表马上切换。同分时优先 5 小时剩余更多的账号。</li>
-      <li>开启自动轮换后，只有当前账号任一窗口剩余 ≤<span id="auto-floor">5</span>%，且有合格备用账号，才考虑切换。未确认本机聊天使用这组账号、额度未知或过期、处于冷却时都不会自动切换。</li>
+      <li>「下一候选」是额度有效、两个窗口都至少剩余 <span id="reserve-floor"></span>% 的最高分备用账号。它是预览，不代表马上切换。同分时优先 5 小时剩余更多的账号。</li>
+      <li>开启自动轮换后，当前账号任一窗口剩余低于 <span id="auto-floor"></span>% 时，有合格备用账号就提前切换。否则，当前账号使用满 <span id="upgrade-minutes"></span> 分钟后，若有综合分更高的备用账号，就在下一次检查时切换。同分不切。</li>
+      <li>无法确认本机聊天使用这组账号、额度未知或过期、处于冷却时，都不会自动切换。</li>
       <li>「切换推荐账号」会重新读取额度；当前账号最合适时不会强制切走。也可通过账号行的「切换」手动指定。</li>
     </ul>
   </details>
@@ -194,7 +195,7 @@
     const track = node('div', null, 'track');
     track.setAttribute('aria-hidden', 'true');
     if (quota) {
-      const fill = node('div', null, `fill${!live || !quota.valid ? ' old' : quota.remaining <= lowQuota ? ' low' : ''}`);
+      const fill = node('div', null, `fill${!live || !quota.valid ? ' old' : quota.remaining < lowQuota ? ' low' : ''}`);
       fill.style.width = `${quota.remaining}%`;
       track.append(fill);
     }
@@ -234,6 +235,7 @@
     $('next').textContent = next ? `下一候选：${next.label} · ${scoreText(next.score)}`
       : `下一候选：${state.error ? '账号读取失败' : !hasData ? '等待读取账号' : '暂无符合条件的候选'}`;
     $('reserve-floor').textContent = $('auto-floor').textContent = state.lowQuota;
+    $('upgrade-minutes').textContent = state.upgradeMinutes;
     $('recommendation').textContent = state.recommendation ?? '';
     $('recommendation').hidden = !state.recommendation;
     $('count').textContent = hasData ? `${state.accounts.length} 个` : '';
